@@ -1,0 +1,16 @@
+:root {
+  --color-bg: #f5f7fb;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f9fbff;
+  --color-text: #1a1d24;
+  --color-text-muted: #697182;
+  --color-border: #d7dbe5;
+  --color-primary: #2456f5;
+  --color-primary-soft: #e8edff;
+  --color-hover: #eef2ff;
+  --color-focus-ring: rgba(36, 86, 245, 0.24);
+  --color-error: #c13a2f;
+  --color-success: #1f8f56;
+  --color-overlay: rgba(16, 20, 29, 0.48);
+  --color-shadow: rgba(14, 22, 38, 0.2);
+}

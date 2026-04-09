@@ -1,0 +1,784 @@
+import {
+  createButton,
+  createField,
+  createSwitch,
+  createToastArea,
+  openConfirmModal,
+  openFormModal,
+  openInfoModal,
+  pushToast,
+  setFieldState,
+  setButtonLoading,
+} from "/static/ui-components.js";
+
+const ui = {
+  pages: {},
+  toastArea: null,
+  map: null,
+  layers: {},
+  markers: new Map(),
+  routeLines: [],
+  mapMode: localStorage.getItem("gpslogger.map.mode") || "street",
+  showHistory: (localStorage.getItem("gpslogger.map.showHistory") || "true") === "true",
+  activePage: "map",
+  autoRefreshHandle: null,
+};
+
+const state = {
+  devices: [],
+  deviceStatuses: {},
+  settings: {},
+  systemStatus: {},
+  forwardingErrors: [],
+  recentGps: [],
+  themes: [],
+  selectedDeviceId: localStorage.getItem("gpslogger.selectedDeviceId") || "",
+};
+
+function isIsoDateTime(value) {
+  if (!value) return true;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime());
+}
+
+function isHttpUrl(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "API Fehler");
+  return data;
+}
+
+async function bootstrap() {
+  ui.toastArea = createToastArea();
+  document.body.appendChild(ui.toastArea);
+
+  await Promise.all([loadDevices(), loadDeviceStatuses(), loadSettings(), loadThemes(), loadSystemStatus(), loadForwardingErrors()]);
+  applyTheme(state.settings.theme || "light");
+  buildTabs();
+  buildMapPage();
+  buildDevicesPage();
+  buildSettingsPage();
+  showPage("map");
+  await refreshMapData();
+  startAutoRefresh();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopAutoRefresh();
+    } else {
+      runAutoRefreshCycle();
+      startAutoRefresh();
+    }
+  });
+}
+
+function buildTabs() {
+  const tabs = document.getElementById("tabs");
+  tabs.innerHTML = "";
+  [
+    { id: "map", label: "Karte", icon: "map" },
+    { id: "devices", label: "Geräte", icon: "devices" },
+    { id: "settings", label: "Einstellungen", icon: "settings" },
+  ].forEach((tab) => {
+    const host = document.createElement("div");
+    host.className = "tab";
+    const btn = createButton({
+      label: tab.label,
+      icon: tab.icon,
+      onClick: () => showPage(tab.id),
+    });
+    btn.dataset.page = tab.id;
+    host.appendChild(btn);
+    tabs.appendChild(host);
+  });
+}
+
+function showPage(pageId) {
+  ui.activePage = pageId;
+  document.querySelectorAll(".page").forEach((page) => {
+    page.classList.toggle("active", page.id === `page-${pageId}`);
+  });
+  document.querySelectorAll("#tabs .btn").forEach((btn) => {
+    btn.classList.toggle("selected", btn.dataset.page === pageId);
+  });
+  if (pageId === "map" && ui.map) {
+    setTimeout(() => ui.map.invalidateSize(), 100);
+  }
+}
+
+async function runAutoRefreshCycle() {
+  try {
+    if (ui.activePage === "map") {
+      await refreshMapData();
+    }
+    if (ui.activePage === "devices") {
+      await loadDevices();
+      await loadDeviceStatuses();
+      renderDeviceList();
+    }
+    if (ui.activePage === "settings") {
+      await loadSystemStatus();
+      await loadForwardingErrors();
+      await loadRecentGps();
+      renderSystemStatus();
+      renderForwardingErrors();
+      renderRecentGps();
+    }
+  } catch (_err) {
+    // Hintergrund-Refresh bleibt bewusst still.
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  ui.autoRefreshHandle = setInterval(runAutoRefreshCycle, 15000);
+}
+
+function stopAutoRefresh() {
+  if (ui.autoRefreshHandle) {
+    clearInterval(ui.autoRefreshHandle);
+    ui.autoRefreshHandle = null;
+  }
+}
+
+function syncMapDeviceSelectOptions(selectElement) {
+  if (!selectElement) return;
+  const previous = state.selectedDeviceId;
+  selectElement.innerHTML = `<option value="">Alle Geräte</option>${state.devices
+    .map((d) => `<option value="${d.id}">${d.name}</option>`)
+    .join("")}`;
+  const stillExists = state.devices.some((d) => d.id === previous);
+  state.selectedDeviceId = stillExists ? previous : "";
+  selectElement.value = state.selectedDeviceId;
+  localStorage.setItem("gpslogger.selectedDeviceId", state.selectedDeviceId);
+}
+
+function buildMapPage() {
+  const page = document.getElementById("page-map");
+  page.innerHTML = `<div class="card"><div id="map-filters"></div><div id="map-actions"></div></div><div class="map-wrap"><div id="map"></div><div class="map-overlay" id="map-overlay"></div></div>`;
+
+  const filtersHost = page.querySelector("#map-filters");
+  const deviceField = createField({ label: "Gerät", type: "select" });
+  deviceField.input.id = "map-device";
+  const fromField = createField({ label: "Von (ISO)", placeholder: "2026-04-08T00:00:00Z" });
+  fromField.input.id = "map-from";
+  fromField.input.value = localStorage.getItem("gpslogger.map.from") || "";
+  const toField = createField({ label: "Bis (ISO)", placeholder: "2026-04-08T23:59:59Z" });
+  toField.input.id = "map-to";
+  toField.input.value = localStorage.getItem("gpslogger.map.to") || "";
+  filtersHost.append(deviceField.field, fromField.field, toField.field);
+
+  const actionHost = page.querySelector("#map-actions");
+  const reloadBtn = createButton({
+    label: "Route laden",
+    icon: "route",
+    onClick: () => refreshMapData({ fromField, toField, reloadBtn }),
+  });
+  actionHost.appendChild(
+    reloadBtn,
+  );
+
+  const mapDevice = deviceField.input;
+  syncMapDeviceSelectOptions(mapDevice);
+  mapDevice.addEventListener("change", () => {
+    state.selectedDeviceId = mapDevice.value;
+    localStorage.setItem("gpslogger.selectedDeviceId", state.selectedDeviceId);
+    refreshMapData({ fromField, toField, reloadBtn });
+  });
+  fromField.input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      refreshMapData({ fromField, toField, reloadBtn });
+    }
+  });
+  toField.input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      refreshMapData({ fromField, toField, reloadBtn });
+    }
+  });
+  fromField.input.addEventListener("change", () => {
+    localStorage.setItem("gpslogger.map.from", fromField.input.value || "");
+  });
+  toField.input.addEventListener("change", () => {
+    localStorage.setItem("gpslogger.map.to", toField.input.value || "");
+  });
+
+  ui.map = L.map("map", { zoomControl: true, scrollWheelZoom: true, touchZoom: true }).setView([51.2, 10.4], 6);
+  ui.layers.street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap",
+    maxZoom: 19,
+  });
+  ui.layers.satellite = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Tiles &copy; Esri", maxZoom: 19 },
+  );
+  if (ui.mapMode === "satellite") {
+    ui.layers.satellite.addTo(ui.map);
+  } else {
+    ui.layers.street.addTo(ui.map);
+  }
+
+  const overlay = page.querySelector("#map-overlay");
+  const historySwitch = createSwitch({
+    label: "Historie",
+    value: ui.showHistory,
+    onChange: (enabled) => {
+      ui.showHistory = enabled;
+      localStorage.setItem("gpslogger.map.showHistory", String(enabled));
+      ui.routeLines.forEach((line) => {
+        if (enabled) {
+          if (!ui.map.hasLayer(line)) line.addTo(ui.map);
+        } else if (ui.map.hasLayer(line)) {
+          ui.map.removeLayer(line);
+        }
+      });
+    },
+  });
+  const layerSwitch = createSwitch({
+    label: "Satellit",
+    value: ui.mapMode === "satellite",
+    onChange: (enabled) => setMapMode(enabled ? "satellite" : "street"),
+  });
+  overlay.appendChild(historySwitch.wrap);
+  overlay.appendChild(layerSwitch.wrap);
+}
+
+function setMapMode(mode) {
+  if (ui.mapMode === mode) return;
+  ui.map.removeLayer(ui.layers[ui.mapMode]);
+  ui.map.addLayer(ui.layers[mode]);
+  ui.mapMode = mode;
+  localStorage.setItem("gpslogger.map.mode", mode);
+}
+
+async function refreshMapData(opts = {}) {
+  const fromInput = document.getElementById("map-from");
+  const toInput = document.getElementById("map-to");
+  const from = fromInput?.value || "";
+  const to = toInput?.value || "";
+  localStorage.setItem("gpslogger.map.from", from);
+  localStorage.setItem("gpslogger.map.to", to);
+  const fromField = opts.fromField || (fromInput ? { field: fromInput.closest(".field"), input: fromInput, message: fromInput.closest(".field")?.querySelector(".field-message") } : null);
+  const toField = opts.toField || (toInput ? { field: toInput.closest(".field"), input: toInput, message: toInput.closest(".field")?.querySelector(".field-message") } : null);
+
+  setFieldState(fromField, "default", "");
+  setFieldState(toField, "default", "");
+
+  if (!isIsoDateTime(from)) {
+    setFieldState(fromField, "error", "Ungültiges ISO-Datum.");
+    return;
+  }
+  if (!isIsoDateTime(to)) {
+    setFieldState(toField, "error", "Ungültiges ISO-Datum.");
+    return;
+  }
+  if (from && to && new Date(from).getTime() > new Date(to).getTime()) {
+    setFieldState(fromField, "error", "Von darf nicht nach Bis liegen.");
+    setFieldState(toField, "error", "Bis muss nach Von liegen.");
+    return;
+  }
+
+  if (opts.reloadBtn) {
+    setButtonLoading(opts.reloadBtn, true, "Lädt...");
+  }
+  const query = new URLSearchParams();
+  if (state.selectedDeviceId) query.set("device_id", state.selectedDeviceId);
+  if (from) query.set("from", from);
+  if (to) query.set("to", to);
+  try {
+    const data = await api(`/api/positions?${query.toString()}`);
+    const positions = data.positions || [];
+    setFieldState(fromField, "success", "");
+    setFieldState(toField, "success", "");
+    drawPositions(positions);
+  } catch (err) {
+    pushToast(ui.toastArea, err.message, "error");
+  } finally {
+    if (opts.reloadBtn) {
+      setButtonLoading(opts.reloadBtn, false);
+    }
+  }
+}
+
+function drawPositions(positions) {
+  ui.markers.forEach((marker) => ui.map.removeLayer(marker));
+  ui.markers.clear();
+  ui.routeLines.forEach((line) => ui.map.removeLayer(line));
+  ui.routeLines = [];
+  if (!positions.length) return;
+
+  const byDevice = new Map();
+  positions.forEach((p) => {
+    if (!byDevice.has(p.device_id)) byDevice.set(p.device_id, []);
+    byDevice.get(p.device_id).push(p);
+  });
+
+  const allLatLng = [];
+  byDevice.forEach((items) => {
+    items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+    const route = items.map((item) => [item.latitude, item.longitude]);
+    allLatLng.push(...route);
+    const line = L.polyline(route, { color: "var(--color-primary)" }).addTo(ui.map);
+    if (!ui.showHistory) {
+      ui.map.removeLayer(line);
+    }
+    ui.routeLines.push(line);
+    const latest = items[items.length - 1];
+    const icon = L.divIcon({ className: "", html: `<div class="pulse-marker"></div>`, iconSize: [20, 20] });
+    const marker = L.marker([latest.latitude, latest.longitude], { icon }).addTo(ui.map);
+    marker.bindPopup(`${latest.device_name}<br>${latest.timestamp}`);
+    ui.markers.set(latest.device_id, marker);
+  });
+
+  const bounds = L.latLngBounds(allLatLng);
+  if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
+}
+
+function buildDevicesPage() {
+  const page = document.getElementById("page-devices");
+  page.innerHTML = `<div class="card"><div id="devices-create"></div></div><div class="card"><div id="devices-list" class="list"></div></div>`;
+  const createHost = page.querySelector("#devices-create");
+  const nameField = createField({ label: "Neues Gerät", placeholder: "z. B. Caspar" });
+  const createBtn = createButton({
+    label: "Gerät hinzufügen",
+    icon: "add",
+    onClick: async () => {
+      const name = nameField.input.value.trim();
+      if (!name) {
+        setFieldState(nameField, "error", "Bitte Gerätenamen eingeben.");
+        return;
+      }
+      setFieldState(nameField, "success", "");
+      try {
+        const res = await api("/api/devices", {
+          method: "POST",
+          body: JSON.stringify({ name }),
+        });
+        nameField.input.value = "";
+        setFieldState(nameField, "default", "");
+        showApiKeyModal(res.device);
+        await loadDevices();
+        await loadDeviceStatuses();
+        renderDeviceList();
+      } catch (err) {
+        setFieldState(nameField, "error", err.message);
+        pushToast(ui.toastArea, err.message, "error");
+      }
+    },
+  });
+  createHost.append(nameField.field, createBtn);
+  renderDeviceList();
+}
+
+function renderDeviceList() {
+  const list = document.getElementById("devices-list");
+  if (!list) return;
+  list.innerHTML = "";
+  state.devices.forEach((device) => {
+    const item = document.createElement("div");
+    item.className = "list-item";
+    const info = document.createElement("div");
+    const status = state.deviceStatuses[device.id];
+    const seen = status?.last_seen ? new Date(status.last_seen).toLocaleString("de-DE") : "Nie";
+    const position =
+      status?.latitude != null && status?.longitude != null
+        ? `${Number(status.latitude).toFixed(5)}, ${Number(status.longitude).toFixed(5)}`
+        : "Keine Position";
+    info.innerHTML = `<strong>${device.name}</strong><br><small>${device.id}</small><br><small>Last Seen: ${seen}</small><br><small>Pos: ${position}</small>`;
+    const actions = document.createElement("div");
+    const renameBtn = createButton({
+      label: "Umbenennen",
+      onClick: async () => {
+        openRenameModal(device);
+      },
+    });
+    const rotateBtn = createButton({
+      label: "API-Key neu",
+      onClick: async () => {
+        openRotateKeyModal(device);
+      },
+    });
+    const deleteBtn = createButton({
+      label: "Löschen",
+      onClick: async () => {
+        openDeleteModal(device);
+      },
+    });
+    actions.append(renameBtn, rotateBtn, deleteBtn);
+    item.append(info, actions);
+    list.appendChild(item);
+  });
+}
+
+function showApiKeyModal(device) {
+  const keyField = createField({ label: `${device.name} API-Key`, value: device.api_key });
+  keyField.input.readOnly = true;
+  const copyBtn = createButton({
+    label: "Key kopieren",
+    icon: "content_copy",
+    onClick: async () => {
+      try {
+        await navigator.clipboard.writeText(device.api_key);
+        pushToast(ui.toastArea, "API-Key kopiert", "success");
+      } catch (_err) {
+        pushToast(ui.toastArea, "Kopieren nicht möglich", "error");
+      }
+    },
+  });
+  const content = document.createElement("div");
+  content.append(keyField.field, copyBtn);
+  openInfoModal({ title: "Gerät erstellt", content });
+}
+
+function openRenameModal(device) {
+  openFormModal({
+    title: "Gerät umbenennen",
+    submitLabel: "Speichern",
+    fields: [{ key: "name", label: "Neuer Name", value: device.name }],
+    onSubmit: async (values, _controls, fieldMap) => {
+      const nextName = String(values.name || "").trim();
+      if (!nextName) {
+        setFieldState(fieldMap.name, "error", "Bitte Namen eingeben.");
+        throw new Error("invalid");
+      }
+      setFieldState(fieldMap.name, "success", "");
+      try {
+        await api(`/api/devices/${device.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: nextName }),
+        });
+        await loadDevices();
+        await loadDeviceStatuses();
+        renderDeviceList();
+        pushToast(ui.toastArea, "Gerät aktualisiert", "success");
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+        throw err;
+      }
+    },
+  });
+}
+
+function openDeleteModal(device) {
+  openConfirmModal({
+    title: "Löschen bestätigen",
+    message: `Gerät "${device.name}" wirklich löschen?`,
+    confirmLabel: "Löschen",
+    onConfirm: async () => {
+      try {
+        await api(`/api/devices/${device.id}`, { method: "DELETE" });
+        await loadDevices();
+        await loadDeviceStatuses();
+        renderDeviceList();
+        pushToast(ui.toastArea, "Gerät gelöscht", "success");
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+        throw err;
+      }
+    },
+  });
+}
+
+function openRotateKeyModal(device) {
+  openConfirmModal({
+    title: "API-Key neu generieren",
+    message: `Für "${device.name}" einen neuen API-Key erstellen? Der alte Key wird sofort ungültig.`,
+    confirmLabel: "Neu generieren",
+    onConfirm: async () => {
+      try {
+        const res = await api(`/api/devices/${device.id}/rotate-key`, { method: "POST" });
+        showApiKeyModal(res.device);
+        pushToast(ui.toastArea, "API-Key erneuert", "success");
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+        throw err;
+      }
+    },
+  });
+}
+
+function buildSettingsPage() {
+  const page = document.getElementById("page-settings");
+  page.innerHTML = `<div class="card"><div id="settings-system-status"></div></div><div class="card"><div id="settings-forwarding-errors"></div></div><div class="card"><div id="settings-recent-gps"></div></div><div class="card"><div id="settings-host"></div></div>`;
+  const host = page.querySelector("#settings-host");
+
+  const nasInterval = createField({
+    label: "NAS Intervall (Sekunden)",
+    type: "number",
+    value: String(state.settings.nas_interval_seconds || 60),
+  });
+  const nasPath = createField({ label: "NAS Pfad", value: state.settings.nas_path || "nas_storage" });
+  const forwardingUrl = createField({ label: "Forwarding URL", value: state.settings.forwarding_url || "" });
+  const forwardingHeaders = createField({
+    label: "Forwarding Header JSON",
+    type: "textarea",
+    value: JSON.stringify(state.settings.forwarding_headers || {}, null, 2),
+  });
+  const themeSelect = createField({ label: "Theme", type: "select" });
+  themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
+  themeSelect.input.value = state.settings.theme || "light";
+
+  const forwardingSwitch = createSwitch({
+    label: "Weiterleitung aktiv",
+    value: !!state.settings.forwarding_enabled,
+    onChange: (value) => {
+      state.settings.forwarding_enabled = value;
+    },
+  });
+
+  const saveNowBtn = createButton({
+    label: "Jetzt abspeichern",
+    icon: "save",
+    onClick: async () => {
+      setButtonLoading(saveNowBtn, true, "Speichert...");
+      try {
+        const res = await api("/api/save-now", { method: "POST" });
+        pushToast(ui.toastArea, `Gespeichert: ${res.result.saved_count}`, "success");
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+      } finally {
+        setButtonLoading(saveNowBtn, false);
+      }
+    },
+  });
+
+  const saveBtn = createButton({
+    label: "Einstellungen speichern",
+    icon: "check",
+    onClick: async () => {
+      setButtonLoading(saveBtn, true, "Speichert...");
+      try {
+        const headersRaw = forwardingHeaders.input.value.trim();
+        setFieldState(nasInterval, "default", "");
+        setFieldState(forwardingUrl, "default", "");
+        setFieldState(forwardingHeaders, "default", "");
+
+        const intervalValue = Number(nasInterval.input.value || 60);
+        if (!Number.isFinite(intervalValue) || intervalValue < 5) {
+          setFieldState(nasInterval, "error", "Intervall muss mindestens 5 Sekunden sein.");
+          throw new Error("Bitte Eingaben prüfen");
+        }
+        if (state.settings.forwarding_enabled && forwardingUrl.input.value.trim() === "") {
+          setFieldState(forwardingUrl, "error", "Bitte Forwarding-URL angeben.");
+          throw new Error("Bitte Eingaben prüfen");
+        }
+        if (state.settings.forwarding_enabled && !isHttpUrl(forwardingUrl.input.value.trim())) {
+          setFieldState(forwardingUrl, "error", "Forwarding-URL muss mit http:// oder https:// beginnen.");
+          throw new Error("Bitte Eingaben prüfen");
+        }
+
+        let parsedHeaders = {};
+        if (headersRaw) {
+          try {
+            parsedHeaders = JSON.parse(headersRaw);
+            if (typeof parsedHeaders !== "object" || Array.isArray(parsedHeaders) || parsedHeaders === null) {
+              throw new Error("invalid");
+            }
+          } catch (_err) {
+            setFieldState(forwardingHeaders, "error", "Header müssen valides JSON-Objekt sein.");
+            throw new Error("Bitte Eingaben prüfen");
+          }
+        }
+
+        const payload = {
+          nas_interval_seconds: intervalValue,
+          nas_path: nasPath.input.value.trim(),
+          forwarding_enabled: !!state.settings.forwarding_enabled,
+          forwarding_url: forwardingUrl.input.value.trim(),
+          forwarding_headers: parsedHeaders,
+          theme: themeSelect.input.value,
+        };
+        const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+        state.settings = data.settings;
+        applyTheme(state.settings.theme);
+        setFieldState(nasInterval, "success", "");
+        setFieldState(forwardingUrl, "success", "");
+        setFieldState(forwardingHeaders, "success", "");
+        pushToast(ui.toastArea, "Einstellungen gespeichert", "success");
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+      } finally {
+        setButtonLoading(saveBtn, false);
+      }
+    },
+  });
+
+  themeSelect.input.addEventListener("change", () => applyTheme(themeSelect.input.value));
+  host.append(
+    nasInterval.field,
+    nasPath.field,
+    forwardingSwitch.wrap,
+    forwardingUrl.field,
+    forwardingHeaders.field,
+    themeSelect.field,
+    saveNowBtn,
+    saveBtn,
+  );
+  renderSystemStatus();
+  renderForwardingErrors();
+  renderRecentGps();
+}
+
+function renderSystemStatus() {
+  const host = document.getElementById("settings-system-status");
+  if (!host) return;
+  const status = state.systemStatus || {};
+  const uptime = Number(status.uptime_seconds || 0);
+  const h = Math.floor(uptime / 3600);
+  const m = Math.floor((uptime % 3600) / 60);
+  const s = uptime % 60;
+  const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString("de-DE") : "Noch kein Lauf";
+  const lastNasError = status.last_nas_error || "Kein Fehler";
+  host.innerHTML = `
+    <h3>Systemstatus</h3>
+    <div class="list">
+      <div class="list-item"><span>Uptime</span><strong>${h}h ${m}m ${s}s</strong></div>
+      <div class="list-item"><span>Geräte</span><strong>${status.device_count ?? 0}</strong></div>
+      <div class="list-item"><span>Forwarding Queue</span><strong>${status.forward_queue_size ?? 0}</strong></div>
+      <div class="list-item"><span>Pending NAS</span><strong>${status.pending_nas_count ?? 0}</strong></div>
+      <div class="list-item"><span>Gespeicherte Statusobjekte</span><strong>${status.stored_status_count ?? 0}</strong></div>
+      <div class="list-item"><span>Letzter NAS-Lauf</span><strong>${lastNasRun}</strong></div>
+      <div class="list-item"><span>Beim letzten NAS-Lauf gespeichert</span><strong>${status.last_nas_saved_count ?? 0}</strong></div>
+      <div class="list-item"><span>NAS Fehlerstatus</span><small>${lastNasError}</small></div>
+    </div>
+  `;
+}
+
+function renderForwardingErrors() {
+  const host = document.getElementById("settings-forwarding-errors");
+  if (!host) return;
+  const errors = state.forwardingErrors || [];
+  const rows = errors.length
+    ? errors
+        .map(
+          (entry) =>
+            `<div class="list-item"><span>${new Date(entry.time).toLocaleString("de-DE")}</span><small>${entry.message}</small></div>`,
+        )
+        .join("")
+    : `<div class="list-item"><span>Keine Forwarding-Fehler</span></div>`;
+  host.innerHTML = `
+    <div class="panel-head">
+      <h3>Forwarding Fehler</h3>
+      <div class="panel-actions">
+        <button id="reload-forwarding-errors" class="btn">Neu laden</button>
+        <button id="clear-forwarding-errors" class="btn">Leeren</button>
+      </div>
+    </div>
+    <div class="list">${rows}</div>
+  `;
+  const btn = host.querySelector("#reload-forwarding-errors");
+  btn?.addEventListener("click", async () => {
+    setButtonLoading(btn, true, "Lädt...");
+    try {
+      await loadForwardingErrors();
+      renderForwardingErrors();
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  });
+  const clearBtn = host.querySelector("#clear-forwarding-errors");
+  clearBtn?.addEventListener("click", async () => {
+    setButtonLoading(clearBtn, true, "Löscht...");
+    try {
+      await api("/api/forwarding/errors/clear", { method: "POST" });
+      await loadForwardingErrors();
+      renderForwardingErrors();
+    } finally {
+      setButtonLoading(clearBtn, false);
+    }
+  });
+}
+
+function renderRecentGps() {
+  const host = document.getElementById("settings-recent-gps");
+  if (!host) return;
+  const rows = (state.recentGps || [])
+    .map(
+      (entry) =>
+        `<div class="list-item"><span>${entry.device_name || entry.device_id || "Unbekannt"} | ${new Date(entry.timestamp).toLocaleString("de-DE")}</span><small>${entry.latitude}, ${entry.longitude} (acc: ${entry.accuracy ?? "-"})</small></div>`,
+    )
+    .join("");
+  host.innerHTML = `
+    <div class="panel-head">
+      <h3>Letzte GPS-Requests</h3>
+      <div class="panel-actions">
+        <button id="reload-recent-gps" class="btn">Neu laden</button>
+      </div>
+    </div>
+    <div class="list">${rows || `<div class="list-item"><span>Keine GPS-Daten</span></div>`}</div>
+  `;
+  const btn = host.querySelector("#reload-recent-gps");
+  btn?.addEventListener("click", async () => {
+    setButtonLoading(btn, true, "Lädt...");
+    try {
+      await loadRecentGps();
+      renderRecentGps();
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  });
+}
+
+function applyTheme(name) {
+  let link = document.getElementById("theme-link");
+  if (!link) {
+    link = document.createElement("link");
+    link.id = "theme-link";
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+  }
+  link.href = `/themes/${name}/theme.css`;
+}
+
+async function loadDevices() {
+  const data = await api("/api/devices");
+  state.devices = data.devices || [];
+  const mapSelect = document.getElementById("map-device");
+  syncMapDeviceSelectOptions(mapSelect);
+}
+
+async function loadDeviceStatuses() {
+  const data = await api("/api/devices/status");
+  state.deviceStatuses = data.statuses || {};
+}
+
+async function loadSettings() {
+  const data = await api("/api/settings");
+  state.settings = data.settings || {};
+}
+
+async function loadThemes() {
+  const data = await api("/api/themes");
+  state.themes = data.themes || ["light"];
+}
+
+async function loadSystemStatus() {
+  const data = await api("/api/system/status");
+  state.systemStatus = data.status || {};
+}
+
+async function loadForwardingErrors() {
+  const data = await api("/api/forwarding/errors?limit=20");
+  state.forwardingErrors = data.errors || [];
+}
+
+async function loadRecentGps() {
+  const data = await api("/api/gps/recent?limit=20");
+  state.recentGps = data.requests || [];
+}
+
+bootstrap().catch((err) => {
+  console.error(err);
+  alert(`Init Fehler: ${err.message}`);
+});

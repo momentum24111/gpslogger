@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Runtime data
+data/
+
+# IDE / local
+.cursor/
