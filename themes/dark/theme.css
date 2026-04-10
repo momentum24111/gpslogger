@@ -7,7 +7,6 @@
   --color-border: #323a4a;
   --color-primary: #7ea1ff;
   --color-primary-soft: #2f4476;
-  --color-selection-bg: #3d5285;
   --color-hover: #2a3142;
   --color-focus-ring: rgba(126, 161, 255, 0.3);
   --color-error: #ff7e76;
@@ -49,8 +48,8 @@
   --topbar-toggle-fg: var(--color-text);
   --topbar-toggle-hover-bg: var(--color-hover);
   --topbar-toggle-hover-fg: var(--color-text);
-  --topbar-toggle-active-bg: var(--color-selection-bg);
-  --topbar-toggle-active-fg: var(--color-text);
+  --topbar-toggle-active-bg: var(--color-primary);
+  --topbar-toggle-active-fg: #ffffff;
   --topbar-toggle-active-border: var(--color-primary);
   --topbar-toggle-focus-ring: 2px solid var(--color-primary);
   --topbar-toggle-focus-offset: 2px;
@@ -109,8 +108,8 @@
   --seg-bg: var(--color-surface-elevated);
   --seg-border: var(--color-border);
   --seg-fg: var(--color-text-muted);
-  --seg-active-bg: var(--color-selection-bg);
-  --seg-active-fg: var(--color-text);
+  --seg-active-bg: var(--color-primary);
+  --seg-active-fg: #ffffff;
   --seg-hover-bg: var(--color-hover);
 
   --card-bg: var(--color-surface);
@@ -118,7 +117,7 @@
 
   --sidebar-item-fg: var(--color-text);
   --sidebar-item-hover-bg: var(--color-hover);
-  --sidebar-item-selected-bg: var(--color-selection-bg);
+  --sidebar-item-selected-bg: var(--color-primary);
   --sidebar-icon-hover-bg: var(--color-hover);
 
   --spinner-track: var(--color-border);
