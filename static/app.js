@@ -12,6 +12,14 @@ import {
   setButtonLoading,
 } from "/static/ui-components.js";
 
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 const ui = {
   pages: {},
   toastArea: null,
@@ -419,7 +427,19 @@ function drawPositions(positions) {
     const latest = items[items.length - 1];
     const icon = L.divIcon({ className: "", html: `<div class="pulse-marker"></div>`, iconSize: [20, 20] });
     const marker = L.marker([latest.latitude, latest.longitude], { icon }).addTo(ui.map);
-    marker.bindPopup(`${latest.device_name}<br>${latest.timestamp}`);
+    const popupLines = [escapeHtml(latest.device_name), escapeHtml(latest.timestamp)];
+    if (latest.accuracy != null && latest.accuracy !== "")
+      popupLines.push(`Genauigkeit: ${escapeHtml(String(latest.accuracy))} m`);
+    if (latest.device != null && latest.device !== "")
+      popupLines.push(`Gerät (Client): ${escapeHtml(latest.device)}`);
+    if (latest.battery != null && latest.battery !== "")
+      popupLines.push(`Akku: ${escapeHtml(String(latest.battery))}`);
+    if (latest.speed != null) popupLines.push(`Geschw.: ${escapeHtml(String(latest.speed))}`);
+    if (latest.direction != null) popupLines.push(`Richtung: ${escapeHtml(String(latest.direction))}°`);
+    if (latest.altitude != null) popupLines.push(`Höhe: ${escapeHtml(String(latest.altitude))}`);
+    if (latest.provider) popupLines.push(`Provider: ${escapeHtml(latest.provider)}`);
+    if (latest.activity) popupLines.push(`Aktivität: ${escapeHtml(latest.activity)}`);
+    marker.bindPopup(popupLines.join("<br>"));
     ui.markers.set(latest.device_id, marker);
   });
 
@@ -507,7 +527,15 @@ function renderDeviceList() {
       status?.latitude != null && status?.longitude != null
         ? `${Number(status.latitude).toFixed(5)}, ${Number(status.longitude).toFixed(5)}`
         : "Keine Position";
-    info.innerHTML = `<strong>${device.name}</strong><br><small>${device.id}</small><br><small>Last Seen: ${seen}</small><br><small>Pos: ${position}</small>`;
+    const statBits = [];
+    if (status?.battery != null && status.battery !== "") statBits.push(`Akku: ${status.battery}`);
+    if (status?.speed != null) statBits.push(`Geschw.: ${status.speed}`);
+    if (status?.provider) statBits.push(String(status.provider));
+    if (status?.activity) statBits.push(String(status.activity));
+    const statExtra = statBits.length
+      ? `<br><small>${statBits.map((t) => escapeHtml(t)).join(" · ")}</small>`
+      : "";
+    info.innerHTML = `<strong>${escapeHtml(device.name)}</strong><br><small>${escapeHtml(device.id)}</small><br><small>Last Seen: ${escapeHtml(seen)}</small><br><small>Pos: ${escapeHtml(position)}</small>${statExtra}`;
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
     const copyKeyBtn = createButton({
@@ -987,10 +1015,23 @@ function renderRecentGps() {
   const host = document.getElementById("settings-recent-gps");
   if (!host) return;
   const rows = (state.recentGps || [])
-    .map(
-      (entry) =>
-        `<div class="list-item"><span>${entry.device_name || entry.device_id || "Unbekannt"} | ${new Date(entry.timestamp).toLocaleString("de-DE")}</span><small>${entry.latitude}, ${entry.longitude} (acc: ${entry.accuracy ?? "-"})</small></div>`,
-    )
+    .map((entry) => {
+      const title = entry.device_name || entry.device_id || "Unbekannt";
+      const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString("de-DE") : "—";
+      const parts = [
+        `${entry.latitude}, ${entry.longitude}`,
+        entry.accuracy != null ? `acc ${entry.accuracy}` : null,
+        entry.device != null && entry.device !== "" ? `Client: ${entry.device}` : null,
+        entry.battery != null && entry.battery !== "" ? `Batt ${entry.battery}` : null,
+        entry.speed != null ? `v ${entry.speed}` : null,
+        entry.direction != null ? `↗ ${entry.direction}` : null,
+        entry.altitude != null ? `alt ${entry.altitude}` : null,
+        entry.provider ? String(entry.provider) : null,
+        entry.activity ? String(entry.activity) : null,
+        entry.ingest_route ? entry.ingest_route : null,
+      ].filter(Boolean);
+      return `<div class="list-item"><span>${escapeHtml(title)} | ${escapeHtml(ts)}</span><small>${escapeHtml(parts.join(" · "))}</small></div>`;
+    })
     .join("");
   host.innerHTML = `
     <div class="panel-head">

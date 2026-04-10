@@ -20,7 +20,14 @@ def build_openapi_spec() -> dict:
             {"name": "Geräte", "description": "Geräte anlegen, umbenennen, löschen, API-Keys"},
             {"name": "Weiterleitungen", "description": "HTTP-Weiterleitungen für Rohe GPS-Requests"},
             {"name": "Einstellungen", "description": "Globale Einstellungen (NAS, Theme, Forwardings-Liste lesen)"},
-            {"name": "GPS-Ingest", "description": "GPS-Punkt per Mobilgerät senden (`application/x-www-form-urlencoded`)"},
+            {
+                "name": "GPS-Ingest",
+                "description": (
+                    "Positionsdaten per Mobilgerät: `application/x-www-form-urlencoded`, "
+                    "`Authorization: Bearer <api_key>`. "
+                    "Werkbank-kompatibel unter `/api/current-location`; Legacy `/api/gps`."
+                ),
+            },
             {"name": "Daten", "description": "Gespeicherte Positionen und Diagnose-Metadaten"},
         ],
         "paths": {
@@ -530,6 +537,42 @@ def build_openapi_spec() -> dict:
                     },
                 }
             },
+            "/api/current-location": {
+                "post": {
+                    "tags": ["GPS-Ingest"],
+                    "summary": "Aktuelle Position melden (Werkbank)",
+                    "description": (
+                        "Gleiches Schema wie Werkbank: `Content-Type: application/x-www-form-urlencoded`, "
+                        "`Authorization: Bearer <api_key>`. "
+                        "Pflicht: `latitude`, `longitude`. "
+                        "Optional (werden gespeichert und bei Weiterleitungen als identischer Request-Body versendet): "
+                        "`device`, `accuracy`, `battery`, `speed`, `direction`, `altitude`, `provider`, `activity`, `time`. "
+                        "`time` ist ISO-8601 (wie bei Werkbank); fehlt sie, setzt der Server den Zeitstempel."
+                    ),
+                    "operationId": "postCurrentLocation",
+                    "security": [{"bearerApiKey": []}],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/x-www-form-urlencoded": {
+                                "schema": {"$ref": "#/components/schemas/CurrentLocationForm"},
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Position gespeichert; Weiterleitungs-Queue wie bei `/api/gps`",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/GpsOkResponse"}
+                                }
+                            },
+                        },
+                        "400": {"$ref": "#/components/responses/BadRequestJson"},
+                        "401": {"$ref": "#/components/responses/UnauthorizedJson"},
+                    },
+                }
+            },
             "/api/positions": {
                 "get": {
                     "tags": ["Daten"],
@@ -716,6 +759,34 @@ def build_openapi_spec() -> dict:
                     "required": ["settings"],
                 },
                 "GpsOkResponse": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
+                "CurrentLocationForm": {
+                    "type": "object",
+                    "required": ["latitude", "longitude"],
+                    "properties": {
+                        "latitude": {"type": "string", "description": "Breitengrad (Dezimal)"},
+                        "longitude": {"type": "string", "description": "Längengrad (Dezimal)"},
+                        "device": {"type": "string", "description": "Geräte-/Client-Kennung laut Werkbank"},
+                        "accuracy": {"type": "string", "description": "Genauigkeit (m), nicht negativ wenn numerisch"},
+                        "battery": {
+                            "type": "string",
+                            "description": "Akku (z. B. 0–100 oder freier Text, z. B. charging)",
+                        },
+                        "speed": {"type": "string", "description": "Geschwindigkeit (beliebige Einheit, numerisch)"},
+                        "direction": {"type": "string", "description": "Richtung / Heading in Grad, numerisch"},
+                        "altitude": {"type": "string", "description": "Höhe, numerisch"},
+                        "provider": {"type": "string", "description": "Standortdienst / GNSS-Quelle"},
+                        "activity": {"type": "string", "description": "Aktivität (z. B. still, walking)"},
+                        "time": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Messzeitpunkt ISO-8601; optional, sonst Serverzeit",
+                        },
+                        "timestamp": {
+                            "type": "string",
+                            "description": "Alias für time (ISO-8601), falls der Client nicht `time` nutzt",
+                        },
+                    },
+                },
                 "PositionsResponse": {
                     "type": "object",
                     "properties": {"positions": {"type": "array", "items": {"type": "object"}}},

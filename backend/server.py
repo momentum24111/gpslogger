@@ -92,6 +92,37 @@ def parse_accuracy(value: str | None) -> float | None:
     return parsed
 
 
+def optional_form_str(fields: dict, key: str) -> str | None:
+    v = fields.get(key)
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
+def parse_optional_float_field(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_battery_value(value) -> float | str | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    text = str(value).strip()
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
 def sanitize_forward_headers(headers: dict) -> dict:
     cleaned: dict[str, str] = {}
     for key, value in headers.items():
@@ -172,6 +203,90 @@ def discover_themes() -> list[str]:
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
+
+    def _read_urlencoded_body(self, max_length: int = 1024 * 1024):
+        content_type = self.headers.get("Content-Type", "")
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > max_length:
+            return None, None, "Ungueltige Request-Groesse"
+        raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
+        if "application/x-www-form-urlencoded" not in content_type:
+            return None, None, "Nur x-www-form-urlencoded wird unterstuetzt"
+        fields = {k: v[-1] for k, v in urlparse.parse_qs(raw_body, keep_blank_values=True).items()}
+        return raw_body, fields, None
+
+    def _finish_gps_ingest(self, device: dict, fields: dict, raw_body: str, ingest_route: str):
+        latitude = fields.get("latitude") or fields.get("lat")
+        longitude = fields.get("longitude") or fields.get("lon") or fields.get("lng")
+        accuracy = fields.get("accuracy")
+        if latitude is None or longitude is None:
+            return json_response(self, {"error": "latitude und longitude sind erforderlich"}, HTTPStatus.BAD_REQUEST)
+        lat = parse_coordinate(latitude, -90.0, 90.0)
+        lon = parse_coordinate(longitude, -180.0, 180.0)
+        if lat is None or lon is None:
+            return json_response(self, {"error": "Ungueltige Koordinaten"}, HTTPStatus.BAD_REQUEST)
+        normalized_accuracy = parse_accuracy(str(accuracy) if accuracy is not None else None)
+        if accuracy is not None and str(accuracy).strip() != "" and normalized_accuracy is None:
+            return json_response(self, {"error": "Ungueltige accuracy"}, HTTPStatus.BAD_REQUEST)
+
+        if ingest_route == "/api/gps":
+            timestamp = fields.get("timestamp") or utc_now_iso()
+            normalized_timestamp = parse_iso_timestamp(timestamp)
+            if normalized_timestamp is None:
+                return json_response(self, {"error": "timestamp muss ISO-Format haben"}, HTTPStatus.BAD_REQUEST)
+        else:
+            time_candidate = optional_form_str(fields, "time") or optional_form_str(fields, "timestamp")
+            if time_candidate:
+                normalized_timestamp = parse_iso_timestamp(time_candidate)
+                if normalized_timestamp is None:
+                    return json_response(self, {"error": "time muss ISO-Format haben"}, HTTPStatus.BAD_REQUEST)
+            else:
+                normalized_timestamp = utc_now_iso()
+
+        headers_dict = {k: v for k, v in self.headers.items()}
+        record = {
+            "device_id": device["id"],
+            "device_name": device["name"],
+            "latitude": lat,
+            "longitude": lon,
+            "accuracy": normalized_accuracy,
+            "timestamp": normalized_timestamp,
+            "ingest_route": ingest_route,
+            "extra_fields": fields,
+            "raw_body": raw_body,
+            "headers": headers_dict,
+            "received_at": utc_now_iso(),
+        }
+        if ingest_route == "/api/current-location":
+            record["device"] = optional_form_str(fields, "device")
+            record["battery"] = parse_battery_value(fields.get("battery"))
+            record["speed"] = parse_optional_float_field(fields.get("speed"))
+            record["direction"] = parse_optional_float_field(fields.get("direction"))
+            record["altitude"] = parse_optional_float_field(fields.get("altitude"))
+            record["provider"] = optional_form_str(fields, "provider")
+            record["activity"] = optional_form_str(fields, "activity")
+            record["time"] = optional_form_str(fields, "time")
+
+        state.store_gps_request(record)
+        try:
+            forward_queue.put_nowait(record)
+        except queue.Full:
+            msg = "queue voll, request wird nicht weitergeleitet"
+            print(f"[forwarding] warning: {msg}")
+            state.append_forwarding_error(msg)
+        return json_response(self, {"ok": True})
+
+    def _handle_gps_ingest(self, ingest_route: str):
+        token = parse_bearer_token(self)
+        if not token:
+            return json_response(self, {"error": "Authorization Bearer fehlt"}, HTTPStatus.UNAUTHORIZED)
+        device = state.get_device_by_key(token)
+        if not device:
+            return json_response(self, {"error": "Ungueltiger API-Key"}, HTTPStatus.UNAUTHORIZED)
+        raw_body, fields, err = self._read_urlencoded_body()
+        if err:
+            return json_response(self, {"error": err}, HTTPStatus.BAD_REQUEST)
+        return self._finish_gps_ingest(device, fields, raw_body, ingest_route)
 
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -319,60 +434,10 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, {"device": rotated})
 
         if route == "/api/gps":
-            token = parse_bearer_token(self)
-            if not token:
-                return json_response(self, {"error": "Authorization Bearer fehlt"}, HTTPStatus.UNAUTHORIZED)
-            device = state.get_device_by_key(token)
-            if not device:
-                return json_response(self, {"error": "Ungueltiger API-Key"}, HTTPStatus.UNAUTHORIZED)
+            return self._handle_gps_ingest("/api/gps")
 
-            content_type = self.headers.get("Content-Type", "")
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 1024 * 1024:
-                return json_response(self, {"error": "Ungueltige Request-Groesse"}, HTTPStatus.BAD_REQUEST)
-            raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
-            if "application/x-www-form-urlencoded" not in content_type:
-                return json_response(self, {"error": "Nur x-www-form-urlencoded wird unterstuetzt"}, HTTPStatus.BAD_REQUEST)
-
-            fields = {k: v[-1] for k, v in urlparse.parse_qs(raw_body, keep_blank_values=True).items()}
-            latitude = fields.get("latitude") or fields.get("lat")
-            longitude = fields.get("longitude") or fields.get("lon") or fields.get("lng")
-            accuracy = fields.get("accuracy")
-            timestamp = fields.get("timestamp") or utc_now_iso()
-
-            if latitude is None or longitude is None:
-                return json_response(self, {"error": "latitude und longitude sind erforderlich"}, HTTPStatus.BAD_REQUEST)
-            lat = parse_coordinate(latitude, -90.0, 90.0)
-            lon = parse_coordinate(longitude, -180.0, 180.0)
-            if lat is None or lon is None:
-                return json_response(self, {"error": "Ungueltige Koordinaten"}, HTTPStatus.BAD_REQUEST)
-            normalized_accuracy = parse_accuracy(accuracy)
-            if accuracy is not None and normalized_accuracy is None:
-                return json_response(self, {"error": "Ungueltige accuracy"}, HTTPStatus.BAD_REQUEST)
-            normalized_timestamp = parse_iso_timestamp(timestamp)
-            if normalized_timestamp is None:
-                return json_response(self, {"error": "timestamp muss ISO-Format haben"}, HTTPStatus.BAD_REQUEST)
-
-            record = {
-                "device_id": device["id"],
-                "device_name": device["name"],
-                "latitude": lat,
-                "longitude": lon,
-                "accuracy": normalized_accuracy,
-                "timestamp": normalized_timestamp,
-                "extra_fields": fields,
-                "raw_body": raw_body,
-                "headers": {k: v for k, v in self.headers.items()},
-                "received_at": utc_now_iso(),
-            }
-            state.store_gps_request(record)
-            try:
-                forward_queue.put_nowait(record)
-            except queue.Full:
-                msg = "queue voll, request wird nicht weitergeleitet"
-                print(f"[forwarding] warning: {msg}")
-                state.append_forwarding_error(msg)
-            return json_response(self, {"ok": True})
+        if route == "/api/current-location":
+            return self._handle_gps_ingest("/api/current-location")
 
         if route == "/api/forwarding/errors/clear":
             state.clear_forwarding_errors()

@@ -126,13 +126,60 @@ class AppState:
                 device_id = str(item.get("device_id", "")).strip()
                 if not device_id:
                     continue
-                statuses[device_id] = {
-                    "last_seen": item.get("timestamp") or item.get("received_at"),
-                    "latitude": item.get("latitude"),
-                    "longitude": item.get("longitude"),
-                    "accuracy": item.get("accuracy"),
+                row = self._position_row_from_stored(item)
+                if row is None:
+                    continue
+                st: dict[str, Any] = {
+                    "last_seen": row.get("timestamp") or item.get("received_at"),
+                    "latitude": row.get("latitude"),
+                    "longitude": row.get("longitude"),
+                    "accuracy": row.get("accuracy"),
                 }
+                for k in (
+                    "device",
+                    "battery",
+                    "speed",
+                    "direction",
+                    "altitude",
+                    "provider",
+                    "activity",
+                    "ingest_route",
+                ):
+                    if item.get(k) is not None:
+                        st[k] = item[k]
+                statuses[device_id] = st
         return statuses
+
+    @staticmethod
+    def _position_row_from_stored(item: dict[str, Any]) -> dict[str, Any] | None:
+        """Eine Zeile für API/UI aus gespeichertem GPS-Datensatz (nur mit gültigen Koordinaten)."""
+        try:
+            lat = float(item.get("latitude"))
+            lon = float(item.get("longitude"))
+        except (TypeError, ValueError):
+            return None
+        base: dict[str, Any] = {
+            "device_id": item.get("device_id"),
+            "device_name": item.get("device_name"),
+            "latitude": lat,
+            "longitude": lon,
+            "accuracy": item.get("accuracy"),
+            "timestamp": item.get("timestamp") or item.get("received_at"),
+        }
+        for key in (
+            "device",
+            "battery",
+            "speed",
+            "direction",
+            "altitude",
+            "provider",
+            "activity",
+            "time",
+            "ingest_route",
+        ):
+            if key in item and item[key] is not None:
+                base[key] = item[key]
+        return base
 
     def list_devices(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -390,12 +437,25 @@ class AppState:
             self.pending_nas.append(payload)
             device_id = str(payload.get("device_id", "")).strip()
             if device_id:
-                self.device_statuses[device_id] = {
+                st: dict[str, Any] = {
                     "last_seen": payload.get("timestamp") or payload.get("received_at"),
                     "latitude": payload.get("latitude"),
                     "longitude": payload.get("longitude"),
                     "accuracy": payload.get("accuracy"),
                 }
+                for k in (
+                    "device",
+                    "battery",
+                    "speed",
+                    "direction",
+                    "altitude",
+                    "provider",
+                    "activity",
+                    "ingest_route",
+                ):
+                    if payload.get(k) is not None:
+                        st[k] = payload[k]
+                self.device_statuses[device_id] = st
             self._persist_pending()
             self._persist_statuses()
 
@@ -453,26 +513,14 @@ class AppState:
                 item = json.loads(line)
                 if device_id and item.get("device_id") != device_id:
                     continue
-                try:
-                    lat = float(item.get("latitude"))
-                    lon = float(item.get("longitude"))
-                except (TypeError, ValueError):
-                    continue
                 item_time = parse_time(item.get("timestamp")) or parse_time(item.get("received_at"))
                 if left and item_time and item_time < left:
                     continue
                 if right and item_time and item_time > right:
                     continue
-                rows.append(
-                    {
-                        "device_id": item.get("device_id"),
-                        "device_name": item.get("device_name"),
-                        "latitude": lat,
-                        "longitude": lon,
-                        "accuracy": item.get("accuracy"),
-                        "timestamp": item.get("timestamp") or item.get("received_at"),
-                    }
-                )
+                row = self._position_row_from_stored(item)
+                if row is not None:
+                    rows.append(row)
         return rows
 
     def get_device_statuses(self) -> dict[str, dict[str, Any]]:
@@ -492,16 +540,12 @@ class AppState:
                         item = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    rows.append(
-                        {
-                            "device_id": item.get("device_id"),
-                            "device_name": item.get("device_name"),
-                            "timestamp": item.get("timestamp") or item.get("received_at"),
-                            "latitude": item.get("latitude"),
-                            "longitude": item.get("longitude"),
-                            "accuracy": item.get("accuracy"),
-                        }
-                    )
+                    pr = self._position_row_from_stored(item)
+                    if pr is None:
+                        continue
+                    out = dict(pr)
+                    out["received_at"] = item.get("received_at")
+                    rows.append(out)
             if limit < 1:
                 return []
             return rows[-limit:]
