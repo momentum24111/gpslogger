@@ -18,7 +18,7 @@ const ui = {
   layers: {},
   markers: new Map(),
   routeLines: [],
-  mapMode: localStorage.getItem("gpslogger.map.mode") || "street",
+  mapMode: localStorage.getItem("gpslogger.map.mode") || "satellite",
   showHistory: (localStorage.getItem("gpslogger.map.showHistory") || "true") === "true",
   activePage: "map",
   autoRefreshHandle: null,
@@ -604,6 +604,20 @@ function buildSettingsPage() {
         <h3>Speicherung</h3>
         <div id="settings-storage" class="ui-form-grid"></div>
       </section>
+      <section class="settings-section settings-diagnostics">
+        <details class="settings-accordion">
+          <summary>Systemstatus</summary>
+          <div id="settings-system-status"></div>
+        </details>
+        <details class="settings-accordion">
+          <summary>Forwarding Fehler</summary>
+          <div id="settings-forwarding-errors"></div>
+        </details>
+        <details class="settings-accordion">
+          <summary>Letzte GPS Requests</summary>
+          <div id="settings-recent-gps"></div>
+        </details>
+      </section>
       <section class="settings-section">
         <h3>Weiterleitung</h3>
         <div id="settings-forwarding" class="ui-form-grid"></div>
@@ -613,18 +627,7 @@ function buildSettingsPage() {
         <div id="devices-create" class="ui-form-grid"></div>
         <div id="devices-list" class="list ui-list"></div>
       </section>
-      <section class="settings-section">
-        <h3>Systemstatus</h3>
-        <div id="settings-system-status"></div>
-      </section>
-      <section class="settings-section">
-        <h3>Forwarding Fehler</h3>
-        <div id="settings-forwarding-errors"></div>
-      </section>
-      <section class="settings-section">
-        <h3>Letzte GPS Requests</h3>
-        <div id="settings-recent-gps"></div>
-      </section>
+      <div id="settings-save-footer" class="settings-save-footer"></div>
     </div>
   `;
   const themeHost = page.querySelector("#settings-theme");
@@ -658,7 +661,7 @@ function buildSettingsPage() {
   forwardingSwitch.wrap.classList.add("ui-settings-switch");
 
   const saveNowBtn = createButton({
-    label: "Jetzt abspeichern",
+    label: "Jetzt GPS Informationen abspeichern",
     icon: "save",
     onClick: async () => {
       setButtonLoading(saveNowBtn, true, "Speichert...");
@@ -734,12 +737,14 @@ function buildSettingsPage() {
       }
     },
   });
-  saveBtn.classList.add("btn-primary");
+  saveBtn.classList.add("btn-primary", "btn-settings-save");
 
   themeSelect.input.addEventListener("change", () => applyTheme(themeSelect.input.value));
   themeHost.append(themeSelect.field);
   storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
-  forwardingHost.append(forwardingSwitch.wrap, forwardingUrl.field, forwardingHeaders.field, saveBtn);
+  forwardingHost.append(forwardingSwitch.wrap, forwardingUrl.field, forwardingHeaders.field);
+  const saveFooter = page.querySelector("#settings-save-footer");
+  saveFooter?.appendChild(saveBtn);
 
   function applyForwardingEnabledState() {
     const enabled = !!state.settings.forwarding_enabled;

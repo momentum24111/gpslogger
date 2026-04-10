@@ -130,4 +130,8 @@
   --scrollbar-thumb-bg: var(--color-border);
   --scrollbar-thumb-hover-bg: var(--color-text-muted);
   --scrollbar-thumb-active-bg: var(--color-primary);
+
+  --shadow-card: none;
+  --shadow-map-overlay: none;
+  --shadow-modal: none;
 }

@@ -19,7 +19,8 @@ html,
 body {
   margin: 0;
   padding: 0;
-  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -45,7 +46,9 @@ textarea {
 }
 
 .app-shell {
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
   background: var(--bg, var(--color-bg));
@@ -53,6 +56,9 @@ textarea {
 
 main {
   min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-header {
@@ -254,23 +260,43 @@ main {
   display: block;
 }
 
+#page-map.page.active {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+#page-settings.page.active {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .card {
   background: var(--card-bg, var(--color-surface));
   border: none;
   border-radius: var(--radius-lg);
   padding: 0.85rem;
   margin-bottom: 0.75rem;
-  box-shadow: 0 4px 16px var(--color-shadow);
+  box-shadow: var(--shadow-card, none);
 }
 
-#page-map.page.active {
-  padding-bottom: 0;
+#page-map .card {
+  margin-bottom: 0;
+  min-height: 0;
 }
 
 #map-filters,
 #map-actions,
 #devices-create,
-#settings-host {
+#settings-theme,
+#settings-storage,
+#settings-forwarding {
   display: grid;
   gap: var(--spacing-md);
 }
@@ -343,15 +369,24 @@ main {
 }
 
 .map-layout {
-  display: grid;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 0.8rem;
-  min-height: calc(100dvh - 122px);
+}
+
+.map-filters-panel {
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
 }
 
 .map-wrap {
   position: relative;
-  height: min(58vh, 620px);
-  min-height: 340px;
+  flex: 1;
+  min-height: 0;
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -369,7 +404,7 @@ main {
   background: var(--card-bg, var(--color-surface));
   padding: var(--spacing-md);
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 24px var(--color-shadow);
+  box-shadow: var(--shadow-map-overlay, none);
   display: grid;
   gap: var(--spacing-sm);
 }
@@ -436,7 +471,7 @@ main {
   width: min(520px, 100%);
   background: var(--color-surface);
   border-radius: var(--radius-lg);
-  box-shadow: 0 16px 40px var(--color-shadow);
+  box-shadow: var(--shadow-modal, none);
 }
 
 .modal-head {
@@ -482,13 +517,130 @@ main {
   padding-bottom: 0;
 }
 
-.settings-section + .settings-section {
-  border-top: 1px solid var(--card-border, var(--color-border));
-  padding-top: var(--spacing-md);
-}
-
 .settings-section > h3 {
   margin: 0;
+}
+
+.settings-diagnostics {
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+}
+
+.settings-accordion {
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.settings-accordion:last-child {
+  margin-bottom: 0;
+}
+
+.settings-accordion summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  padding: var(--spacing-sm) 0;
+  list-style: none;
+}
+
+.settings-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-accordion .list {
+  margin-top: var(--spacing-sm);
+}
+
+.settings-accordion .panel-head {
+  margin-bottom: var(--spacing-sm);
+}
+
+.settings-section .ui-form-grid > .btn {
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  .settings-section .ui-form-grid > .btn {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+}
+
+.settings-save-footer {
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-sm);
+}
+
+.settings-save-footer .btn,
+.btn-settings-save {
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  .settings-section .ui-form-grid > .field {
+    display: grid;
+    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+    gap: var(--spacing-md);
+    align-items: start;
+  }
+
+  .settings-section .ui-form-grid > .field > span:first-child {
+    padding-top: 0.45rem;
+  }
+
+  .settings-section .ui-form-grid > .field > .input,
+  .settings-section .ui-form-grid > .field > .select,
+  .settings-section .ui-form-grid > .field > .textarea {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-section .ui-form-grid > .field > .field-message {
+    grid-column: 2;
+  }
+
+  #settings-forwarding > .switch {
+    display: grid;
+    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+    gap: var(--spacing-md);
+    align-items: center;
+    width: 100%;
+  }
+
+  #settings-forwarding > .switch > span {
+    grid-column: 1;
+  }
+
+  #settings-forwarding > .switch > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  #settings-forwarding > .field {
+    display: grid;
+    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+    gap: var(--spacing-md);
+    align-items: start;
+  }
+
+  #settings-forwarding > .field > span:first-child {
+    padding-top: 0.45rem;
+  }
+
+  #settings-forwarding > .field > .input,
+  #settings-forwarding > .field > .select,
+  #settings-forwarding > .field > .textarea {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  #settings-forwarding > .field > .field-message {
+    grid-column: 2;
+  }
 }
 
 .panel-head h3 {
@@ -595,15 +747,27 @@ main {
 
 @media (min-width: 900px) {
   .map-layout {
-    grid-template-columns: minmax(300px, 360px) 1fr;
+    display: grid;
+    grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
-    min-height: calc(100dvh - 118px);
+    flex: 1;
+    min-height: 0;
   }
 
-  .map-filters-panel,
+  .map-filters-panel {
+    overflow: auto;
+    min-height: 0;
+    max-height: none;
+    max-width: none;
+    align-self: stretch;
+  }
+
   .map-wrap {
-    height: auto;
-    min-height: 100%;
+    flex: none;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
   }
 }
 
