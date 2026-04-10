@@ -1,0 +1,188 @@
+/* API-Doku: nur Theme-CSS-Variablen; keine festen Farben. */
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
+
+.api-docs-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1.25rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.api-docs-back,
+.api-docs-meta a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.api-docs-back:hover,
+.api-docs-meta a:hover {
+  text-decoration: underline;
+}
+
+.api-docs-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.api-docs-meta {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+#swagger-ui {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.swagger-ui .topbar {
+  display: none;
+}
+
+.swagger-ui .information-container .info .title {
+  color: var(--text);
+}
+
+.swagger-ui .information-container .info p,
+.swagger-ui .information-container .info .base-url,
+.swagger-ui .information-container .info hgroup.main a {
+  color: var(--text-muted);
+}
+
+.swagger-ui .scheme-container {
+  background: var(--panel);
+  box-shadow: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m, 8px);
+}
+
+.swagger-ui .filter-container .filter input {
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  color: var(--control-fg);
+  border-radius: var(--radius-s, 4px);
+}
+
+.swagger-ui .opblock {
+  border-color: var(--border);
+  border-radius: var(--radius-m, 8px);
+  background: var(--panel);
+  margin-bottom: 0.75rem;
+}
+
+.swagger-ui .opblock .opblock-summary {
+  border-color: var(--border);
+}
+
+.swagger-ui .opblock .opblock-summary-method {
+  background: var(--active-bg);
+  color: var(--text);
+  border-radius: var(--radius-s, 4px);
+  min-width: 4.5rem;
+}
+
+.swagger-ui .opblock.opblock-get .opblock-summary-method {
+  background: var(--seg-active-bg);
+}
+
+.swagger-ui .opblock.opblock-post .opblock-summary-method {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.swagger-ui .opblock.opblock-put .opblock-summary-method {
+  background: var(--warning);
+  color: var(--primary-contrast);
+}
+
+.swagger-ui .opblock.opblock-patch .opblock-summary-method {
+  background: var(--info);
+  color: var(--primary-contrast);
+}
+
+.swagger-ui .opblock.opblock-delete .opblock-summary-method {
+  background: var(--danger);
+  color: var(--primary-contrast);
+}
+
+.swagger-ui .opblock .opblock-summary-path,
+.swagger-ui .opblock .opblock-summary-description {
+  color: var(--text);
+}
+
+.swagger-ui .opblock-description-wrapper p,
+.swagger-ui .opblock .body-param__example,
+.swagger-ui table thead tr th,
+.swagger-ui table tbody tr td {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.swagger-ui .parameter__name,
+.swagger-ui .model-title,
+.swagger-ui .prop-type,
+.swagger-ui .response-col_status {
+  color: var(--text-muted);
+}
+
+.swagger-ui .btn.execute {
+  background: var(--button-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--button-fg);
+}
+
+.swagger-ui .btn.execute:hover {
+  background: var(--button-hover-bg);
+}
+
+.swagger-ui .btn.cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.swagger-ui textarea,
+.swagger-ui input[type="text"],
+.swagger-ui input[type="password"],
+.swagger-ui select {
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  color: var(--control-fg);
+}
+
+.swagger-ui .response-col_links {
+  color: var(--primary);
+}
+
+.swagger-ui .highlight-code,
+.swagger-ui .microlight,
+.swagger-ui .responses-inner h4,
+.swagger-ui .response-col_description__inner div.markdown p,
+.swagger-ui .model-box {
+  background: var(--bg-elevated) !important;
+  color: var(--text) !important;
+}
+
+.swagger-ui section.models {
+  border-color: var(--border);
+}
+
+.swagger-ui section.models h4 {
+  color: var(--text);
+}
+
+.swagger-ui section.models .model-container {
+  background: var(--panel);
+  border-color: var(--border);
+}

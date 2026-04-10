@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib import parse as urlparse
 from urllib import request as urlrequest
 
+from .openapi_spec import build_openapi_spec
 from .state import AppState
 from .utils import utc_now_iso
 
@@ -200,6 +201,10 @@ class Handler(BaseHTTPRequestHandler):
         route = parsed.path
         query = urlparse.parse_qs(parsed.query)
 
+        if route in ("/api", "/api/"):
+            return self._serve_file(STATIC_DIR / "api-docs.html")
+        if route == "/api/openapi.json":
+            return json_response(self, build_openapi_spec())
         if route == "/api/devices":
             return json_response(self, {"devices": state.list_devices()})
         if route == "/api/health":
