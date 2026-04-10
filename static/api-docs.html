@@ -19,7 +19,8 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui@5.11.2/dist/swagger-ui.css" crossorigin />
+    <!-- Swagger UI: /dist/ ist korrekt; kein crossorigin bei <script> (sonst CORS am Skript). -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui@5.11.2/dist/swagger-ui.css" />
     <link rel="stylesheet" href="/static/api-docs.css" />
   </head>
   <body>
@@ -31,8 +32,8 @@
       </span>
     </header>
     <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui@5.11.2/swagger-ui-bundle.js" crossorigin></script>
-    <script src="https://unpkg.com/swagger-ui@5.11.2/swagger-ui-standalone-preset.js" crossorigin></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui@5.11.2/dist/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui@5.11.2/dist/swagger-ui-standalone-preset.js"></script>
     <script>
       (function () {
         var pathname = window.location.pathname.replace(/\/+$/, "");
@@ -49,6 +50,7 @@
           filter: true,
           presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
           layout: "StandaloneLayout",
+          validatorUrl: null,
         });
       })();
     </script>
