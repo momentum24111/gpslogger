@@ -87,18 +87,20 @@ async function bootstrap() {
 function buildTabs() {
   const tabs = document.getElementById("tabs");
   tabs.innerHTML = "";
+  tabs.classList.add("ui-nav");
   [
     { id: "map", label: "Karte", icon: "map" },
     { id: "devices", label: "Geräte", icon: "devices" },
     { id: "settings", label: "Einstellungen", icon: "settings" },
   ].forEach((tab) => {
     const host = document.createElement("div");
-    host.className = "tab";
+    host.className = "tab ui-tab";
     const btn = createButton({
       label: tab.label,
       icon: tab.icon,
       onClick: () => showPage(tab.id),
     });
+    btn.classList.add("ui-nav-btn");
     btn.dataset.page = tab.id;
     host.appendChild(btn);
     tabs.appendChild(host);
@@ -167,7 +169,7 @@ function syncMapDeviceSelectOptions(selectElement) {
 
 function buildMapPage() {
   const page = document.getElementById("page-map");
-  page.innerHTML = `<div class="card"><div id="map-filters"></div><div id="map-actions"></div></div><div class="map-wrap"><div id="map"></div><div class="map-overlay" id="map-overlay"></div></div>`;
+  page.innerHTML = `<div class="card ui-panel"><div id="map-filters" class="ui-form-grid"></div><div id="map-actions" class="ui-actions-row"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div>`;
 
   const filtersHost = page.querySelector("#map-filters");
   const deviceField = createField({ label: "Gerät", type: "select" });
@@ -186,6 +188,7 @@ function buildMapPage() {
     icon: "route",
     onClick: () => refreshMapData({ fromField, toField, reloadBtn }),
   });
+  reloadBtn.classList.add("btn-primary", "ui-primary-action");
   actionHost.appendChild(
     reloadBtn,
   );
@@ -250,6 +253,8 @@ function buildMapPage() {
     value: ui.mapMode === "satellite",
     onChange: (enabled) => setMapMode(enabled ? "satellite" : "street"),
   });
+  historySwitch.wrap.classList.add("ui-map-toggle");
+  layerSwitch.wrap.classList.add("ui-map-toggle");
   overlay.appendChild(historySwitch.wrap);
   overlay.appendChild(layerSwitch.wrap);
 }
@@ -347,7 +352,7 @@ function drawPositions(positions) {
 
 function buildDevicesPage() {
   const page = document.getElementById("page-devices");
-  page.innerHTML = `<div class="card"><div id="devices-create"></div></div><div class="card"><div id="devices-list" class="list"></div></div>`;
+  page.innerHTML = `<div class="card ui-panel"><div id="devices-create" class="ui-form-grid"></div></div><div class="card ui-panel"><div id="devices-list" class="list ui-list"></div></div>`;
   const createHost = page.querySelector("#devices-create");
   const nameField = createField({ label: "Neues Gerät", placeholder: "z. B. Caspar" });
   const createBtn = createButton({
@@ -377,6 +382,7 @@ function buildDevicesPage() {
       }
     },
   });
+  createBtn.classList.add("btn-primary");
   createHost.append(nameField.field, createBtn);
   renderDeviceList();
 }
@@ -397,6 +403,7 @@ function renderDeviceList() {
         : "Keine Position";
     info.innerHTML = `<strong>${device.name}</strong><br><small>${device.id}</small><br><small>Last Seen: ${seen}</small><br><small>Pos: ${position}</small>`;
     const actions = document.createElement("div");
+    actions.className = "ui-item-actions";
     const renameBtn = createButton({
       label: "Umbenennen",
       onClick: async () => {
@@ -415,6 +422,7 @@ function renderDeviceList() {
         openDeleteModal(device);
       },
     });
+    deleteBtn.classList.add("btn-danger");
     actions.append(renameBtn, rotateBtn, deleteBtn);
     item.append(info, actions);
     list.appendChild(item);
@@ -510,7 +518,7 @@ function openRotateKeyModal(device) {
 
 function buildSettingsPage() {
   const page = document.getElementById("page-settings");
-  page.innerHTML = `<div class="card"><div id="settings-system-status"></div></div><div class="card"><div id="settings-forwarding-errors"></div></div><div class="card"><div id="settings-recent-gps"></div></div><div class="card"><div id="settings-host"></div></div>`;
+  page.innerHTML = `<div class="card ui-panel"><div id="settings-system-status"></div></div><div class="card ui-panel"><div id="settings-forwarding-errors"></div></div><div class="card ui-panel"><div id="settings-recent-gps"></div></div><div class="card ui-panel"><div id="settings-host" class="ui-form-grid"></div></div>`;
   const host = page.querySelector("#settings-host");
 
   const nasInterval = createField({
@@ -536,6 +544,7 @@ function buildSettingsPage() {
       state.settings.forwarding_enabled = value;
     },
   });
+  forwardingSwitch.wrap.classList.add("ui-settings-switch");
 
   const saveNowBtn = createButton({
     label: "Jetzt abspeichern",
@@ -552,6 +561,7 @@ function buildSettingsPage() {
       }
     },
   });
+  saveNowBtn.classList.add("btn-secondary");
 
   const saveBtn = createButton({
     label: "Einstellungen speichern",
@@ -613,6 +623,7 @@ function buildSettingsPage() {
       }
     },
   });
+  saveBtn.classList.add("btn-primary");
 
   themeSelect.input.addEventListener("change", () => applyTheme(themeSelect.input.value));
   host.append(

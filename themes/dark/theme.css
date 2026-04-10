@@ -13,5 +13,122 @@
   --color-success: #6ce0a1;
   --color-overlay: rgba(0, 0, 0, 0.62);
   --color-shadow: rgba(0, 0, 0, 0.45);
+
+  --bg: var(--color-bg);
+  --bg-elevated: var(--color-surface-elevated);
+  --panel: var(--color-surface);
+  --border: var(--color-border);
+  --text: var(--color-text);
+  --text-muted: var(--color-text-muted);
+  --text-dim: var(--color-text-muted);
+
+  --primary: var(--color-primary);
+  --primary-hover: var(--color-primary);
+  --primary-contrast: var(--color-surface);
+  --accent: var(--color-primary);
+  --accent-hover: var(--color-primary);
+  --danger: var(--color-error);
+  --success: var(--color-success);
+  --warning: var(--color-primary);
+  --info: var(--color-primary);
+  --shadow: 0 16px 40px var(--color-shadow);
+  --overlay-backdrop: var(--color-overlay);
+
+  --radius: var(--radius-md, 12px);
+  --radius-m: var(--radius-sm, 8px);
+  --radius-s: 4px;
+  --font-small: 0.75rem;
+
+  --hover-bg: var(--color-hover);
+  --active-bg: var(--color-primary-soft);
+  --focus-outline: 2px solid var(--color-primary);
+  --focus-ring: 2px solid var(--color-primary);
+
+  --topbar-toggle-bg: transparent;
+  --topbar-toggle-fg: var(--color-text);
+  --topbar-toggle-hover-bg: var(--color-hover);
+  --topbar-toggle-hover-fg: var(--color-text);
+  --topbar-toggle-active-bg: var(--color-primary-soft);
+  --topbar-toggle-active-fg: var(--color-text);
+  --topbar-toggle-active-border: var(--color-primary);
+  --topbar-toggle-focus-ring: 2px solid var(--color-primary);
+  --topbar-toggle-focus-offset: 2px;
+
+  --menu-bg: var(--color-surface);
+  --menu-border: var(--color-border);
+  --menu-shadow: 0 16px 40px var(--color-shadow);
+  --menu-fg: var(--color-text);
+
+  --shortcut-bg: var(--color-bg);
+  --shortcut-fg: var(--color-text);
+  --shortcut-border: var(--color-border);
+  --shortcut-destructive-hover-bg: var(--color-error);
+  --shortcut-destructive-hover-fg: var(--color-surface);
+  --shortcut-destructive-hover-border: var(--color-error);
+
+  --button-bg: var(--color-surface-elevated);
+  --button-fg: var(--color-text);
+  --button-hover-bg: var(--color-hover);
+  --btn-bg: var(--button-bg);
+  --btn-fg: var(--button-fg);
+  --btn-border: var(--color-border);
+  --btn-hover-bg: var(--button-hover-bg);
+  --btn-active-bg: var(--color-primary-soft);
+  --btn-focus-ring: var(--color-primary);
+  --btn-ghost-bg: transparent;
+  --btn-ghost-hover-bg: var(--color-hover);
+  --btn-disabled-fg: var(--color-text-muted);
+  --btn-disabled-bg: var(--color-surface);
+  --btn-disabled-opacity: 0.65;
+  --btn-danger-bg: var(--color-error);
+  --btn-danger-fg: var(--color-surface);
+  --btn-danger-hover-bg: var(--color-error);
+  --btn-danger-border: var(--color-error);
+
+  --toast-bg: var(--color-surface);
+  --toast-fg: var(--color-text);
+  --toast-border: var(--color-border);
+  --toast-shadow: 0 16px 40px var(--color-shadow);
+  --toast-accent: var(--color-primary);
+  --toast-icon-fg: var(--color-text);
+  --toast-title-fg: var(--color-text);
+  --toast-content-fg: var(--color-text);
+  --toast-content-muted-fg: var(--color-text-muted);
+  --toast-status-fg: var(--color-text);
+  --toast-top: 1rem;
+  --toast-right: 1rem;
+  --toast-gap: 0.5rem;
+
+  --control-bg: var(--color-surface-elevated);
+  --control-border: var(--color-border);
+  --control-fg: var(--color-text);
+  --control-focus: var(--color-primary);
+  --control-placeholder: var(--color-text-muted);
+
+  --seg-bg: var(--color-surface-elevated);
+  --seg-border: var(--color-border);
+  --seg-fg: var(--color-text-muted);
+  --seg-active-bg: var(--color-primary-soft);
+  --seg-active-fg: var(--color-text);
+  --seg-hover-bg: var(--color-hover);
+
+  --card-bg: var(--color-surface);
+  --card-border: var(--color-border);
+
+  --sidebar-item-fg: var(--color-text);
+  --sidebar-item-hover-bg: var(--color-hover);
+  --sidebar-item-selected-bg: var(--color-primary-soft);
+  --sidebar-icon-hover-bg: var(--color-hover);
+
+  --spinner-track: var(--color-border);
+  --spinner-head: var(--color-primary);
+
+  --scrollbar-size: 10px;
+  --scrollbar-radius: 999px;
+  --scrollbar-thumb-border: 2px;
+  --scrollbar-track-bg: var(--color-surface-elevated);
+  --scrollbar-thumb-bg: var(--color-border);
+  --scrollbar-thumb-hover-bg: var(--color-text-muted);
+  --scrollbar-thumb-active-bg: var(--color-primary);
 }
 
