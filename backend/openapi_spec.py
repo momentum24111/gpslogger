@@ -48,6 +48,27 @@ def build_openapi_spec() -> dict:
                     },
                 }
             },
+            "/api/admin/restart": {
+                "post": {
+                    "tags": ["System"],
+                    "summary": "Neustart über Deploy-Webhook",
+                    "description": (
+                        "Löst asynchron einen POST auf den lokalen Webhook aus (kein systemctl im HTTP-Handler). "
+                        "Typischerweise nur nach Authelia erreichbar; nicht für öffentliche GPS-Clients."
+                    ),
+                    "operationId": "postAdminRestart",
+                    "responses": {
+                        "200": {
+                            "description": "Anfrage angenommen (Neustart läuft im Hintergrund)",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/RestartAcceptedResponse"}
+                                }
+                            },
+                        }
+                    },
+                }
+            },
             "/api/themes": {
                 "get": {
                     "tags": ["System"],
@@ -711,6 +732,14 @@ def build_openapi_spec() -> dict:
                         "service": {"type": "string", "example": "gpslogger"},
                     },
                 },
+                "RestartAcceptedResponse": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {"type": "boolean", "example": True},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["ok"],
+                },
                 "ThemesResponse": {
                     "type": "object",
                     "properties": {"themes": {"type": "array", "items": {"type": "string"}}},
@@ -748,25 +777,20 @@ def build_openapi_spec() -> dict:
                         "url": {"type": "string", "format": "uri"},
                         "headers": {"type": "object", "additionalProperties": {"type": "string"}},
                         "enabled": {"type": "boolean", "default": True},
-                        "merge_incoming_headers": {
+                        "incoming_headers_only": {
                             "type": "boolean",
                             "default": True,
                             "description": (
-                                "Wenn true: alle sanitisierten Header der Geräte-Anfrage als Basis, "
-                                "Zusatz-Header (JSON) überschreiben gleichnamige Keys. "
-                                "Wenn false: nur Zusatz-Header plus Content-Type vom Original (für den POST-Body)."
+                                "Wenn true: ausschließlich die sanitisierten Header der eingehenden Geräte-Anfrage. "
+                                "Wenn false: nur die unter `headers` angegebenen Header plus Content-Type vom Original."
                             ),
                         },
-                        "http_buddy": {
-                            "type": "string",
-                            "description": "Manueller Wert für den Header X-HTTP-Buddy (wenn http_buddy_from_source false ist)",
-                        },
-                        "http_buddy_from_source": {
+                        "forward_body_from_source": {
                             "type": "boolean",
-                            "default": False,
+                            "default": True,
                             "description": (
-                                "Wenn true: Wert aus eingehender Anfrage (Header X-HTTP-Buddy, HTTP-Buddy oder Buddy), "
-                                "ausgehend als X-HTTP-Buddy gesetzt."
+                                "Wenn true: Roh-Body der Geräte-Anfrage unverändert als POST-Daten weiterleiten. "
+                                "Wenn false: leeren Body senden."
                             ),
                         },
                     },

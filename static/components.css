@@ -194,7 +194,7 @@ main {
 }
 
 .btn-secondary {
-  background: var(--bg-elevated, var(--color-surface-elevated));
+  background: var(--color-surface-elevated);
   color: var(--text, var(--color-text));
 }
 
@@ -329,7 +329,7 @@ main {
 .textarea {
   background: var(--control-bg, var(--color-surface-elevated));
   color: var(--control-fg, var(--color-text));
-  border: none;
+  border: 1px solid var(--control-border, transparent);
   border-radius: var(--radius-sm);
   padding: 0.55rem 0.65rem;
 }
@@ -426,7 +426,7 @@ main {
   gap: var(--spacing-sm);
   padding: var(--spacing-md);
   border-radius: var(--radius-md);
-  background: var(--bg-elevated, var(--color-surface-elevated));
+  background: var(--list-item-bg, var(--color-surface-elevated));
 }
 
 .list-item.list-item-managed {
@@ -461,6 +461,65 @@ main {
   color: var(--color-text-muted);
 }
 
+/* Weiterleitungs-Modal: Abschnitte und Hinweise (Farben nur über Theme-Variablen) */
+.forwarding-modal-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 1rem);
+  margin-top: var(--spacing-md, 1rem);
+}
+
+.forwarding-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 0.5rem);
+}
+
+.forwarding-section-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text, var(--color-text));
+}
+
+.forwarding-hint {
+  margin: 0;
+  font-size: var(--font-small, 0.75rem);
+  line-height: 1.45;
+  color: var(--text-muted, var(--color-text-muted));
+}
+
+/* Neustart-Modal: Spinner nutzt Theme-Variablen */
+.restart-wait-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--spacing-md, 1rem);
+  padding: var(--spacing-sm, 0.5rem) 0;
+}
+
+.restart-wait-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 3px solid var(--spinner-track, var(--color-border));
+  border-top-color: var(--spinner-head, var(--color-primary));
+  animation: restart-wait-spin 0.75s linear infinite;
+}
+
+@keyframes restart-wait-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.restart-wait-text {
+  margin: 0;
+  color: var(--text, var(--color-text));
+  font-size: 0.9375rem;
+}
+
+
 .toast-area {
   position: fixed;
   bottom: 20px;
@@ -473,7 +532,7 @@ main {
 .toast {
   padding: var(--spacing-md) var(--spacing-lg);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: var(--toast-bg, var(--color-surface));
 }
 
 .toast.success {
@@ -496,7 +555,7 @@ main {
 
 .modal {
   width: min(520px, 100%);
-  background: var(--color-surface);
+  background: var(--modal-bg, var(--color-surface));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal, none);
 }
@@ -640,6 +699,37 @@ main {
   flex-wrap: wrap;
 }
 
+.leaflet-pulse-marker-icon {
+  background: transparent;
+  border: none;
+}
+
+.pulse-marker-wrap {
+  display: flex;
+  width: 144px;
+  height: 48px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.25rem;
+  box-sizing: border-box;
+}
+
+.pulse-marker-tooltip {
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface-elevated) 94%, transparent);
+  color: var(--color-text);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-text) 18%, transparent);
+  font-size: 0.65rem;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .pulse-marker {
   width: 20px;
   height: 20px;
@@ -647,6 +737,7 @@ main {
   background: var(--color-primary);
   box-shadow: 0 0 0 0 var(--color-primary-soft);
   animation: pulse 2s infinite;
+  flex-shrink: 0;
 }
 
 .segmented {
@@ -768,5 +859,51 @@ main {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.25rem;
     background: transparent;
+  }
+}
+
+/* Ink-Ripple (Material-ähnlich), Farbe via currentColor */
+.ui-ripple-host {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-ripple-host--coarse {
+  transform: none !important;
+}
+
+.ui-ripple-host > :not(.ui-ripple-wave) {
+  position: relative;
+  z-index: 1;
+}
+
+.ui-ripple-wave {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: currentColor;
+  z-index: 0;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0.16;
+  animation-name: ui-ripple-wave;
+  animation-duration: var(--ripple-duration, 420ms);
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: forwards;
+}
+
+@keyframes ui-ripple-wave {
+  from {
+    opacity: 0.16;
+    transform: translate(-50%, -50%) scale(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
   }
 }

@@ -98,19 +98,32 @@ class AppState:
     def _normalize_forwarding_entry(self, raw: dict[str, Any]) -> dict[str, Any]:
         hid = str(raw.get("id") or "").strip() or str(uuid.uuid4())
         headers = raw.get("headers")
-        if raw.get("merge_incoming_headers") is None:
-            merge_in = True
+        headers_d = dict(headers) if isinstance(headers, dict) else {}
+
+        if "incoming_headers_only" in raw:
+            incoming_headers_only = bool(raw["incoming_headers_only"])
         else:
-            merge_in = bool(raw.get("merge_incoming_headers"))
+            leg_merge = raw.get("merge_incoming_headers")
+            if leg_merge is False:
+                incoming_headers_only = False
+            elif len(headers_d) > 0:
+                incoming_headers_only = False
+            else:
+                incoming_headers_only = True
+
+        if "forward_body_from_source" in raw:
+            forward_body_from_source = bool(raw["forward_body_from_source"])
+        else:
+            forward_body_from_source = True
+
         return {
             "id": hid,
             "name": str(raw.get("name", "")).strip() or "Weiterleitung",
             "url": str(raw.get("url", "")).strip(),
-            "headers": dict(headers) if isinstance(headers, dict) else {},
+            "headers": headers_d,
             "enabled": bool(raw.get("enabled")),
-            "merge_incoming_headers": merge_in,
-            "http_buddy": str(raw.get("http_buddy", "")).strip(),
-            "http_buddy_from_source": bool(raw.get("http_buddy_from_source")),
+            "incoming_headers_only": incoming_headers_only,
+            "forward_body_from_source": forward_body_from_source,
         }
 
     def _purge_device_drafts(self) -> None:
@@ -389,9 +402,8 @@ class AppState:
         headers: dict[str, Any],
         enabled: bool,
         *,
-        merge_incoming_headers: bool = True,
-        http_buddy: str = "",
-        http_buddy_from_source: bool = False,
+        incoming_headers_only: bool = True,
+        forward_body_from_source: bool = True,
     ) -> dict[str, Any]:
         with self._lock:
             u = str(url).strip()
@@ -407,9 +419,8 @@ class AppState:
                 "url": u,
                 "headers": h,
                 "enabled": bool(enabled),
-                "merge_incoming_headers": bool(merge_incoming_headers),
-                "http_buddy": str(http_buddy).strip(),
-                "http_buddy_from_source": bool(http_buddy_from_source),
+                "incoming_headers_only": bool(incoming_headers_only),
+                "forward_body_from_source": bool(forward_body_from_source),
             }
             forwardings = list(self.settings.get("forwardings") or [])
             if not isinstance(forwardings, list):
@@ -427,9 +438,8 @@ class AppState:
         headers: dict[str, Any],
         enabled: bool,
         *,
-        merge_incoming_headers: bool = True,
-        http_buddy: str = "",
-        http_buddy_from_source: bool = False,
+        incoming_headers_only: bool = True,
+        forward_body_from_source: bool = True,
     ) -> dict[str, Any] | None:
         with self._lock:
             u = str(url).strip()
@@ -450,9 +460,8 @@ class AppState:
                         "url": u,
                         "headers": h,
                         "enabled": bool(enabled),
-                        "merge_incoming_headers": bool(merge_incoming_headers),
-                        "http_buddy": str(http_buddy).strip(),
-                        "http_buddy_from_source": bool(http_buddy_from_source),
+                        "incoming_headers_only": bool(incoming_headers_only),
+                        "forward_body_from_source": bool(forward_body_from_source),
                     }
                     self.settings["forwardings"] = forwardings
                     self._persist_settings()

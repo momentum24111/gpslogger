@@ -33,6 +33,20 @@ HOP_BY_HOP_HEADERS = {
     "content-length",
 }
 
+RESTART_WEBHOOK_URL = "http://127.0.0.1:9000/"
+
+
+def _fire_restart_webhook() -> None:
+    try:
+        req = urlrequest.Request(RESTART_WEBHOOK_URL, data=b"", method="POST")
+        urlrequest.urlopen(req, timeout=5)
+    except Exception as exc:
+        print(f"[restart] webhook error: {exc}")
+
+
+def schedule_restart_via_webhook() -> None:
+    threading.Thread(target=_fire_restart_webhook, daemon=True).start()
+
 
 def json_response(handler: BaseHTTPRequestHandler, payload: dict, status=HTTPStatus.OK):
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -136,13 +150,6 @@ def sanitize_forward_headers(headers: dict) -> dict:
     return cleaned
 
 
-BUDDY_SOURCE_HEADER_NAMES = (
-    "x-http-buddy",
-    "http-buddy",
-    "buddy",
-)
-
-
 def lookup_header_ci(headers: dict, names: tuple[str, ...]) -> str | None:
     lower_map = {str(k).lower(): v for k, v in headers.items()}
     for name in names:
@@ -158,27 +165,18 @@ def lookup_header_ci(headers: dict, names: tuple[str, ...]) -> str | None:
 
 def build_outgoing_forward_headers(fwd: dict, source_headers: dict) -> dict:
     source_headers = sanitize_forward_headers(source_headers or {})
-    merge_in = fwd.get("merge_incoming_headers")
-    if merge_in is None:
-        merge_in = True
+    iho = fwd.get("incoming_headers_only")
+    if iho is None:
+        iho = True
     else:
-        merge_in = bool(merge_in)
-    if merge_in:
-        headers: dict[str, str] = dict(source_headers)
-    else:
-        headers = {}
-        ct = lookup_header_ci(source_headers, ("content-type",))
-        if ct:
-            headers["Content-Type"] = ct
+        iho = bool(iho)
+    if iho:
+        return dict(source_headers)
+    headers: dict[str, str] = {}
+    ct = lookup_header_ci(source_headers, ("content-type",))
+    if ct:
+        headers["Content-Type"] = ct
     headers.update(sanitize_forward_headers(fwd.get("headers") or {}))
-    if fwd.get("http_buddy_from_source"):
-        buddy = lookup_header_ci(source_headers, BUDDY_SOURCE_HEADER_NAMES)
-        if buddy:
-            headers["X-HTTP-Buddy"] = buddy
-    else:
-        buddy = str(fwd.get("http_buddy") or "").strip()
-        if buddy:
-            headers["X-HTTP-Buddy"] = buddy
     return headers
 
 
@@ -198,15 +196,20 @@ def forwarding_worker():
             forwardings = settings.get("forwardings") or []
             if not isinstance(forwardings, list):
                 continue
-            payload_bytes = item.get("raw_body", "").encode("utf-8")
             raw_in_headers = item.get("headers") or {}
+            raw_body_text = item.get("raw_body", "") or ""
             for fwd in forwardings:
                 if not isinstance(fwd, dict) or not fwd.get("enabled"):
                     continue
                 url = str(fwd.get("url", "")).strip()
                 if not url or not is_http_url(url):
                     continue
-                headers = build_outgoing_forward_headers(fwd, raw_in_headers)
+                nfwd = state._normalize_forwarding_entry(fwd)
+                headers = build_outgoing_forward_headers(nfwd, raw_in_headers)
+                if nfwd.get("forward_body_from_source", True):
+                    payload_bytes = raw_body_text.encode("utf-8")
+                else:
+                    payload_bytes = b""
                 try:
                     req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
                     with urlrequest.urlopen(req, timeout=6):
@@ -459,21 +462,18 @@ class Handler(BaseHTTPRequestHandler):
             headers_raw = body.get("headers")
             headers = headers_raw if isinstance(headers_raw, dict) else {}
             enabled = bool(body.get("enabled", True))
-            merge_raw = body.get("merge_incoming_headers")
-            merge_incoming = True if merge_raw is None else bool(merge_raw)
-            hb_src = bool(body.get("http_buddy_from_source", False))
-            hb = body.get("http_buddy")
-            if hb is not None and not isinstance(hb, str):
-                return json_response(self, {"error": "http_buddy muss ein Text sein"}, HTTPStatus.BAD_REQUEST)
+            iho_raw = body.get("incoming_headers_only")
+            incoming_headers_only = True if iho_raw is None else bool(iho_raw)
+            fbs_raw = body.get("forward_body_from_source")
+            forward_body_from_source = True if fbs_raw is None else bool(fbs_raw)
             try:
                 forwarding = state.create_forwarding(
                     name,
                     url,
                     headers,
                     enabled,
-                    merge_incoming_headers=merge_incoming,
-                    http_buddy=str(hb or ""),
-                    http_buddy_from_source=hb_src,
+                    incoming_headers_only=incoming_headers_only,
+                    forward_body_from_source=forward_body_from_source,
                 )
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
@@ -487,6 +487,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 state.mark_nas_run(saved_count=0, error=str(exc))
                 return json_response(self, {"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        if route == "/api/admin/restart":
+            schedule_restart_via_webhook()
+            return json_response(
+                self,
+                {"ok": True, "message": "Neustart angefordert"},
+            )
 
         if route.startswith("/api/devices/") and route.endswith("/rotate-key"):
             device_id = route.removeprefix("/api/devices/").removesuffix("/rotate-key")
@@ -518,12 +525,10 @@ class Handler(BaseHTTPRequestHandler):
             headers_raw = body.get("headers")
             headers = headers_raw if isinstance(headers_raw, dict) else {}
             enabled = bool(body.get("enabled", True))
-            merge_raw = body.get("merge_incoming_headers")
-            merge_incoming = True if merge_raw is None else bool(merge_raw)
-            hb_src = bool(body.get("http_buddy_from_source", False))
-            hb = body.get("http_buddy")
-            if hb is not None and not isinstance(hb, str):
-                return json_response(self, {"error": "http_buddy muss ein Text sein"}, HTTPStatus.BAD_REQUEST)
+            iho_raw = body.get("incoming_headers_only")
+            incoming_headers_only = True if iho_raw is None else bool(iho_raw)
+            fbs_raw = body.get("forward_body_from_source")
+            forward_body_from_source = True if fbs_raw is None else bool(fbs_raw)
             try:
                 updated = state.update_forwarding(
                     forward_id,
@@ -531,9 +536,8 @@ class Handler(BaseHTTPRequestHandler):
                     url,
                     headers,
                     enabled,
-                    merge_incoming_headers=merge_incoming,
-                    http_buddy=str(hb or ""),
-                    http_buddy_from_source=hb_src,
+                    incoming_headers_only=incoming_headers_only,
+                    forward_body_from_source=forward_body_from_source,
                 )
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)

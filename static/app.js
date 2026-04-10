@@ -11,6 +11,7 @@ import {
   setFieldState,
   setButtonLoading,
 } from "/static/ui-components.js";
+import { initInkRipple } from "/static/ripple.js";
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -18,6 +19,27 @@ function escapeHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** Relative Zeit bis zum angegebenen Zeitpunkt (nur Vergangenheit), z. B. „vor 2 Min.“ */
+function formatRelativeTimeDe(isoString) {
+  const t = new Date(isoString).getTime();
+  if (Number.isNaN(t)) return "—";
+  const diffMs = Math.max(0, Date.now() - t);
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 45) return "gerade eben";
+  const min = Math.floor(diffMs / 60000);
+  if (min < 60) return min === 1 ? "vor 1 Min." : `vor ${min} Min.`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return h === 1 ? "vor 1 Stunde" : `vor ${h} Stunden`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return d === 1 ? "vor 1 Tag" : `vor ${d} Tagen`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return w === 1 ? "vor 1 Woche" : `vor ${w} Wochen`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return mo === 1 ? "vor 1 Monat" : `vor ${mo} Monaten`;
+  const y = Math.floor(d / 365);
+  return y === 1 ? "vor 1 Jahr" : `vor ${y} Jahren`;
 }
 
 const ui = {
@@ -45,6 +67,9 @@ const state = {
   selectedDeviceId: localStorage.getItem("gpslogger.selectedDeviceId") || "",
 };
 
+/** Verhindert parallele Neustart-Workflows (Button / Modal). */
+let gpsloggerRestartWorkflowActive = false;
+
 const PAGE_IDS = new Set(["map", "settings"]);
 
 function isHttpUrl(value) {
@@ -67,9 +92,71 @@ async function api(url, options = {}) {
   return data;
 }
 
+async function runGpsloggerRestart(button) {
+  if (gpsloggerRestartWorkflowActive) return;
+  gpsloggerRestartWorkflowActive = true;
+  if (button) {
+    button.disabled = true;
+  }
+  try {
+    await api("/api/admin/restart", { method: "POST", body: "{}" });
+  } catch (err) {
+    gpsloggerRestartWorkflowActive = false;
+    if (button) button.disabled = false;
+    pushToast(ui.toastArea, err.message, "error");
+    return;
+  }
+
+  const content = document.createElement("div");
+  content.className = "restart-wait-modal-body";
+  const spin = document.createElement("div");
+  spin.className = "restart-wait-spinner";
+  spin.setAttribute("aria-hidden", "true");
+  const text = document.createElement("p");
+  text.className = "restart-wait-text";
+  text.textContent = "GPSLogger wird neu gestartet...";
+  content.append(spin, text);
+
+  const modal = createModal({
+    title: "Neustart",
+    content,
+    actions: [],
+    closeOnEscape: false,
+    closeOnBackdrop: false,
+  });
+  modal.open();
+
+  let pollTimer = null;
+  const clearPoll = () => {
+    if (pollTimer != null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  const pollHealth = async () => {
+    try {
+      const res = await fetch("/api/health", { method: "GET", cache: "no-store" });
+      if (res.ok) {
+        clearPoll();
+        modal.close();
+        window.location.hash = "#map";
+        window.location.reload();
+        return;
+      }
+    } catch (_e) {
+      /* Dienst noch nicht erreichbar */
+    }
+    pollTimer = setTimeout(pollHealth, 3000);
+  };
+
+  pollTimer = setTimeout(pollHealth, 2000);
+}
+
 async function bootstrap() {
   ui.toastArea = createToastArea();
   document.body.appendChild(ui.toastArea);
+  initInkRipple();
 
   await Promise.all([loadDevices(), loadDeviceStatuses(), loadSettings(), loadThemes(), loadSystemStatus(), loadForwardingErrors()]);
   applyTheme(state.settings.theme || "light");
@@ -425,7 +512,13 @@ function drawPositions(positions) {
     }
     ui.routeLines.push(line);
     const latest = items[items.length - 1];
-    const icon = L.divIcon({ className: "", html: `<div class="pulse-marker"></div>`, iconSize: [20, 20] });
+    const rel = escapeHtml(formatRelativeTimeDe(latest.timestamp));
+    const icon = L.divIcon({
+      className: "leaflet-pulse-marker-icon",
+      html: `<div class="pulse-marker-wrap"><span class="pulse-marker-tooltip">${rel}</span><div class="pulse-marker" aria-hidden="true"></div></div>`,
+      iconSize: [144, 48],
+      iconAnchor: [72, 48],
+    });
     const marker = L.marker([latest.latitude, latest.longitude], { icon }).addTo(ui.map);
     const popupLines = [escapeHtml(latest.device_name), escapeHtml(latest.timestamp)];
     if (latest.accuracy != null && latest.accuracy !== "")
@@ -707,6 +800,10 @@ function buildSettingsPage() {
         <div id="devices-create" class="ui-form-grid"></div>
         <div id="devices-list" class="list ui-list"></div>
       </section>
+      <section class="settings-section">
+        <h3>Aktionen</h3>
+        <div id="settings-actions" class="ui-form-grid"></div>
+      </section>
       <div id="settings-save-footer" class="settings-save-footer"></div>
     </div>
   `;
@@ -785,6 +882,15 @@ function buildSettingsPage() {
   addFwBtn.classList.add("btn-primary");
   forwardingAddHost?.appendChild(addFwBtn);
   renderForwardingList();
+  const actionsHost = page.querySelector("#settings-actions");
+  const restartBtn = createButton({
+    label: "GPSLogger neustarten",
+    icon: "refresh",
+    onClick: () => runGpsloggerRestart(restartBtn),
+  });
+  restartBtn.id = "settings-restart-btn";
+  restartBtn.classList.add("btn-secondary");
+  actionsHost?.appendChild(restartBtn);
   const saveFooter = page.querySelector("#settings-save-footer");
   saveFooter?.appendChild(saveBtn);
   renderDevicesSection();
@@ -796,54 +902,72 @@ function buildSettingsPage() {
 function openForwardingModal(existing) {
   const content = document.createElement("div");
   const nameField = createField({ label: "Name", value: existing?.name || "" });
-  const urlField = createField({ label: "Forwarding-URL", value: existing?.url || "" });
-  const mergeIncoming =
-    existing == null || existing.merge_incoming_headers !== false;
-  const mergeHdrSw = createSwitch({
-    label:
-      "Eingehende HTTP-Header der Geräte-Anfrage mit übernehmen (Basis; JSON unten ergänzt/überschreibt)",
-    value: mergeIncoming,
-    onChange: () => {},
-  });
-  const headersField = createField({
-    label: "Zusätzliche Header (JSON)",
-    type: "textarea",
-    value: existing ? JSON.stringify(existing.headers || {}, null, 2) : "{}",
-    placeholder: '{"X-Custom": "…"}',
-  });
-  const buddyFromSrc = !!existing?.http_buddy_from_source;
-  const buddyField = createField({
-    label: "HTTP-Buddy (Header X-HTTP-Buddy)",
-    value: existing?.http_buddy || "",
-    placeholder: "Nur wenn nicht aus Quelle",
-  });
-  if (buddyFromSrc) {
-    buddyField.field.classList.add("is-disabled");
-    buddyField.input.disabled = true;
-  }
-  const buddyFromSw = createSwitch({
-    label:
-      "HTTP-Buddy aus eingehender Anfrage übernehmen (erkennt X-HTTP-Buddy, HTTP-Buddy oder Buddy)",
-    value: buddyFromSrc,
-    onChange: (next) => {
-      buddyField.input.disabled = next;
-      buddyField.field.classList.toggle("is-disabled", next);
-    },
-  });
   const ena = createSwitch({
     label: "Aktiviert",
     value: existing ? !!existing.enabled : true,
     onChange: () => {},
   });
-  content.append(
-    nameField.field,
-    urlField.field,
-    mergeHdrSw.wrap,
-    headersField.field,
-    buddyField.field,
-    buddyFromSw.wrap,
-    ena.wrap,
-  );
+  const urlField = createField({ label: "Forwarding-URL", value: existing?.url || "" });
+
+  const headerSection = document.createElement("div");
+  headerSection.className = "forwarding-modal-section";
+  const headerTitle = document.createElement("div");
+  headerTitle.className = "forwarding-section-title";
+  headerTitle.textContent = "Header";
+  const incomingHeadersOnly =
+    existing == null || existing.incoming_headers_only !== false;
+  const hdrFromDeviceSw = createSwitch({
+    label: "HTTP-Header der eingehenden Geräte-Anfrage übernehmen",
+    value: incomingHeadersOnly,
+    onChange: (next) => {
+      syncHeaderManual(!next);
+    },
+  });
+  const headersField = createField({
+    label: "Manuelle Header (JSON)",
+    type: "textarea",
+    value: existing ? JSON.stringify(existing.headers || {}, null, 2) : "{}",
+    placeholder: "Nur wenn Übernahme oben aus ist",
+  });
+  function syncHeaderManual(allowEdit) {
+    headersField.input.disabled = !allowEdit;
+    headersField.field.classList.toggle("is-disabled", !allowEdit);
+  }
+  syncHeaderManual(!incomingHeadersOnly);
+  headerSection.append(headerTitle, hdrFromDeviceSw.wrap, headersField.field);
+
+  const bodySection = document.createElement("div");
+  bodySection.className = "forwarding-modal-section";
+  const bodyTitle = document.createElement("div");
+  bodyTitle.className = "forwarding-section-title";
+  bodyTitle.textContent = "HTTP Body";
+  const bodyFromSrc =
+    existing == null || existing.forward_body_from_source !== false;
+  const bodyHint = document.createElement("p");
+  bodyHint.className = "forwarding-hint";
+  function syncBodyHint(forwardRawBody) {
+    if (forwardRawBody) {
+      bodyHint.textContent =
+        "Der Roh-Body der Geräte-Anfrage (z. B. application/x-www-form-urlencoded) wird unverändert als POST an die Ziel-URL gesendet. Eine manuelle Body-Eingabe entfällt.";
+    } else {
+      bodyHint.textContent =
+        "Es wird kein Nutzdatenkörper mitgesendet (leerer HTTP-Body). Header richten sich nach den Einstellungen im Bereich „Header“.";
+    }
+  }
+  const bodyFromDeviceSw = createSwitch({
+    label: "HTTP-Body der eingehenden Geräte-Anfrage übernehmen",
+    value: bodyFromSrc,
+    onChange: (next) => {
+      syncBodyHint(next);
+    },
+  });
+  syncBodyHint(bodyFromSrc);
+  bodySection.append(bodyTitle, bodyFromDeviceSw.wrap, bodyHint);
+
+  const sectionsWrap = document.createElement("div");
+  sectionsWrap.className = "forwarding-modal-sections";
+  sectionsWrap.append(headerSection, bodySection);
+  content.append(nameField.field, ena.wrap, urlField.field, sectionsWrap);
   const cancelBtn = createButton({ label: "Abbrechen" });
   const primaryLabel = existing ? "Speichern" : "Hinzufügen";
   const primaryBtn = createButton({ label: primaryLabel, icon: existing ? "check" : "add" });
@@ -855,17 +979,21 @@ function openForwardingModal(existing) {
   });
   cancelBtn.addEventListener("click", () => modal.close());
   primaryBtn.addEventListener("click", async () => {
+    const incoming_headers_only = hdrFromDeviceSw.toggle.classList.contains("enabled");
+    const forward_body_from_source = bodyFromDeviceSw.toggle.classList.contains("enabled");
     let headersObj = {};
-    const raw = headersField.input.value.trim();
-    if (raw) {
-      try {
-        headersObj = JSON.parse(raw);
-        if (typeof headersObj !== "object" || Array.isArray(headersObj) || headersObj === null) {
-          throw new Error("invalid");
+    if (!incoming_headers_only) {
+      const raw = headersField.input.value.trim();
+      if (raw) {
+        try {
+          headersObj = JSON.parse(raw);
+          if (typeof headersObj !== "object" || Array.isArray(headersObj) || headersObj === null) {
+            throw new Error("invalid");
+          }
+        } catch (_err) {
+          setFieldState(headersField, "error", "Ungültiges JSON-Objekt.");
+          return;
         }
-      } catch (_err) {
-        setFieldState(headersField, "error", "Ungültiges JSON-Objekt.");
-        return;
       }
     }
     setFieldState(headersField, "default", "");
@@ -887,9 +1015,6 @@ function openForwardingModal(existing) {
     }
     setFieldState(urlField, "default", "");
     setButtonLoading(primaryBtn, true, "…");
-    const merge_incoming_headers = mergeHdrSw.toggle.classList.contains("enabled");
-    const http_buddy_from_source = buddyFromSw.toggle.classList.contains("enabled");
-    const http_buddy = http_buddy_from_source ? "" : buddyField.input.value.trim();
     try {
       if (existing) {
         await api(`/api/forwardings/${existing.id}`, {
@@ -899,9 +1024,8 @@ function openForwardingModal(existing) {
             url,
             headers: headersObj,
             enabled,
-            merge_incoming_headers,
-            http_buddy,
-            http_buddy_from_source,
+            incoming_headers_only,
+            forward_body_from_source,
           }),
         });
       } else {
@@ -912,9 +1036,8 @@ function openForwardingModal(existing) {
             url,
             headers: headersObj,
             enabled,
-            merge_incoming_headers,
-            http_buddy,
-            http_buddy_from_source,
+            incoming_headers_only,
+            forward_body_from_source,
           }),
         });
       }
@@ -971,9 +1094,8 @@ function renderForwardingList() {
     const meta = document.createElement("small");
     meta.className = "list-item-meta";
     const bits = [];
-    if (f.merge_incoming_headers === false) bits.push("nur Zusatz-Header");
-    if (f.http_buddy_from_source) bits.push("Buddy aus Quelle");
-    else if (f.http_buddy) bits.push("Buddy manuell");
+    if (f.incoming_headers_only === false) bits.push("Header: manuell (JSON)");
+    if (f.forward_body_from_source === false) bits.push("Body: leer");
     meta.textContent = bits.length ? bits.join(" · ") : "";
     body.append(t, document.createElement("br"), u);
     if (meta.textContent) body.append(document.createElement("br"), meta);
