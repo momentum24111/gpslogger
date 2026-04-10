@@ -1,4 +1,4 @@
-"""OpenAPI-3.0-Spezifikation für die GPS-Logger-HTTP-API (manuell an server.py gespiegelt)."""
+"""OpenAPI-3.0-Spezifikation für die GPSLogger-HTTP-API (manuell an server.py gespiegelt)."""
 
 OPENAPI_VERSION = "3.0.3"
 
@@ -7,9 +7,9 @@ def build_openapi_spec() -> dict:
     return {
         "openapi": OPENAPI_VERSION,
         "info": {
-            "title": "GPS Logger API",
+            "title": "GPSLogger API",
             "description": (
-                "REST- und Form-basierte API des GPS Loggers: Geräteverwaltung, "
+                "REST- und Form-basierte API von GPSLogger: Geräteverwaltung, "
                 "Positionsabfrage, Weiterleitungen, Einstellungen und GPS-Ingest per Bearer-API-Key."
             ),
             "version": "1.0.0",

@@ -333,7 +333,7 @@ function buildMapPage() {
   const actionHost = page.querySelector("#map-actions");
   const reloadBtn = createButton({
     label: "Route laden",
-    icon: "route",
+    icon: "refresh",
     onClick: () => refreshMapData({ fromField, toField, reloadBtn }),
   });
   reloadBtn.classList.add("btn-primary", "ui-primary-action");

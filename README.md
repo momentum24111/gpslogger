@@ -1,6 +1,6 @@
-# GPS Logger
+# GPSLogger
 
-Serverseitiger GPS-Logger mit WebUI, Geräteverwaltung, Theme-System und optionaler Request-Weiterleitung.
+Serverseitiger GPSLogger mit WebUI, Geräteverwaltung, Theme-System und optionaler Request-Weiterleitung.
 
 ## Start
 

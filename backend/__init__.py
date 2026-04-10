@@ -1,1 +1,1 @@
-"""GPS Logger backend package."""
+"""GPSLogger backend package."""

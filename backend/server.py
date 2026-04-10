@@ -601,7 +601,7 @@ class Handler(BaseHTTPRequestHandler):
 def run_server(host: str = "0.0.0.0", port: int = 8080):
     threading.Thread(target=forwarding_worker, daemon=True).start()
     threading.Thread(target=save_scheduler, daemon=True).start()
-    print(f"GPS Logger laeuft auf http://{host}:{port}")
+    print(f"GPSLogger laeuft auf http://{host}:{port}")
     server = ThreadingHTTPServer((host, port), Handler)
     server.serve_forever()
 
