@@ -117,22 +117,27 @@ def forwarding_worker():
         item = forward_queue.get()
         try:
             settings = state.get_settings()
-            if not settings.get("forwarding_enabled"):
+            forwardings = settings.get("forwardings") or []
+            if not isinstance(forwardings, list):
                 continue
-            url = settings.get("forwarding_url", "").strip()
-            if not url:
-                continue
-            if not is_http_url(url):
-                msg = "forwarding_url muss http/https sein"
-                print(f"[forwarding] error: {msg}")
-                state.append_forwarding_error(msg)
-                continue
-            headers = sanitize_forward_headers(item.get("headers", {}))
-            headers.update(sanitize_forward_headers(settings.get("forwarding_headers", {})))
-            payload = item.get("raw_body", "").encode("utf-8")
-            req = urlrequest.Request(url=url, data=payload, headers=headers, method="POST")
-            with urlrequest.urlopen(req, timeout=6):
-                pass
+            payload_bytes = item.get("raw_body", "").encode("utf-8")
+            request_headers = sanitize_forward_headers(item.get("headers", {}))
+            for fwd in forwardings:
+                if not isinstance(fwd, dict) or not fwd.get("enabled"):
+                    continue
+                url = str(fwd.get("url", "")).strip()
+                if not url or not is_http_url(url):
+                    continue
+                headers = dict(request_headers)
+                headers.update(sanitize_forward_headers(fwd.get("headers") or {}))
+                try:
+                    req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
+                    with urlrequest.urlopen(req, timeout=6):
+                        pass
+                except Exception as exc:
+                    label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
+                    print(f"[forwarding] error ({label}): {exc}")
+                    state.append_forwarding_error(f"{label}: {exc}")
         except Exception as exc:
             print(f"[forwarding] error: {exc}")
             state.append_forwarding_error(str(exc))
@@ -256,16 +261,41 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse.urlparse(self.path)
         route = parsed.path
 
-        if route == "/api/devices":
+        if route == "/api/devices/draft":
+            draft = state.create_device_draft()
+            return json_response(self, draft)
+
+        if route == "/api/devices/commit":
             body = self._read_json_body()
+            token = str(body.get("draft_token", "")).strip()
             name = str(body.get("name", "")).strip()
-            if not name:
-                return json_response(self, {"error": "Name ist erforderlich"}, HTTPStatus.BAD_REQUEST)
+            if not token or not name:
+                return json_response(self, {"error": "draft_token und name sind erforderlich"}, HTTPStatus.BAD_REQUEST)
             try:
-                device = state.create_device(name)
+                device = state.commit_device_draft(token, name)
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return json_response(self, {"device": device}, HTTPStatus.CREATED)
+
+        if route == "/api/devices":
+            return json_response(
+                self,
+                {"error": "Geräte über /api/devices/draft und /api/devices/commit anlegen"},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        if route == "/api/forwardings":
+            body = self._read_json_body()
+            name = str(body.get("name", "")).strip()
+            url = str(body.get("url", "")).strip()
+            headers_raw = body.get("headers")
+            headers = headers_raw if isinstance(headers_raw, dict) else {}
+            enabled = bool(body.get("enabled", True))
+            try:
+                forwarding = state.create_forwarding(name, url, headers, enabled)
+            except ValueError as exc:
+                return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return json_response(self, {"forwarding": forwarding}, HTTPStatus.CREATED)
 
         if route == "/api/save-now":
             try:
@@ -348,6 +378,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         parsed = urlparse.urlparse(self.path)
         route = parsed.path
+        if route.startswith("/api/forwardings/"):
+            forward_id = route.removeprefix("/api/forwardings/")
+            body = self._read_json_body()
+            name = str(body.get("name", "")).strip()
+            url = str(body.get("url", "")).strip()
+            headers_raw = body.get("headers")
+            headers = headers_raw if isinstance(headers_raw, dict) else {}
+            enabled = bool(body.get("enabled", True))
+            try:
+                updated = state.update_forwarding(forward_id, name, url, headers, enabled)
+            except ValueError as exc:
+                return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            if not updated:
+                return json_response(self, {"error": "Weiterleitung nicht gefunden"}, HTTPStatus.NOT_FOUND)
+            return json_response(self, {"forwarding": updated})
+
         if route.startswith("/api/devices/"):
             device_id = route.removeprefix("/api/devices/")
             body = self._read_json_body()
@@ -372,12 +418,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse.urlparse(self.path)
         route = parsed.path
+        if route.startswith("/api/forwardings/"):
+            forward_id = route.removeprefix("/api/forwardings/")
+            ok = state.delete_forwarding(forward_id)
+            if not ok:
+                return json_response(self, {"error": "Weiterleitung nicht gefunden"}, HTTPStatus.NOT_FOUND)
+            return json_response(self, {"ok": True})
         if route.startswith("/api/devices/"):
             device_id = route.removeprefix("/api/devices/")
             ok = state.delete_device(device_id)
             if not ok:
                 return json_response(self, {"error": "Device nicht gefunden"}, HTTPStatus.NOT_FOUND)
             return json_response(self, {"ok": True})
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_PATCH(self):
+        parsed = urlparse.urlparse(self.path)
+        route = parsed.path
+        if route.startswith("/api/forwardings/"):
+            forward_id = route.removeprefix("/api/forwardings/")
+            body = self._read_json_body()
+            if "enabled" not in body:
+                return json_response(self, {"error": "enabled ist erforderlich"}, HTTPStatus.BAD_REQUEST)
+            updated = state.set_forwarding_enabled(forward_id, bool(body.get("enabled")))
+            if not updated:
+                return json_response(self, {"error": "Weiterleitung nicht gefunden"}, HTTPStatus.NOT_FOUND)
+            return json_response(self, {"forwarding": updated})
         self.send_error(HTTPStatus.NOT_FOUND)
 
 

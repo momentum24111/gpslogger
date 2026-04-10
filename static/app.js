@@ -1,6 +1,7 @@
 import {
   createButton,
   createField,
+  createModal,
   createSwitch,
   createToastArea,
   openConfirmModal,
@@ -139,11 +140,13 @@ async function runAutoRefreshCycle() {
       await refreshMapData();
     }
     if (ui.activePage === "settings") {
+      await loadSettings();
       await loadDevices();
       await loadDeviceStatuses();
       await loadSystemStatus();
       await loadForwardingErrors();
       await loadRecentGps();
+      renderForwardingList();
       renderDeviceList();
       renderSystemStatus();
       renderForwardingErrors();
@@ -429,38 +432,65 @@ function renderDevicesSection() {
   const listHost = document.getElementById("devices-list");
   if (!createHost || !listHost) return;
   createHost.innerHTML = "";
-  listHost.innerHTML = "";
-  const nameField = createField({ label: "Neues Gerät", placeholder: "z. B. Caspar" });
-  const createBtn = createButton({
+  const addBtn = createButton({
     label: "Gerät hinzufügen",
     icon: "add",
-    onClick: async () => {
-      const name = nameField.input.value.trim();
-      if (!name) {
-        setFieldState(nameField, "error", "Bitte Gerätenamen eingeben.");
-        return;
-      }
-      setFieldState(nameField, "success", "");
-      try {
-        const res = await api("/api/devices", {
-          method: "POST",
-          body: JSON.stringify({ name }),
-        });
-        nameField.input.value = "";
-        setFieldState(nameField, "default", "");
-        showApiKeyModal(res.device);
-        await loadDevices();
-        await loadDeviceStatuses();
-        renderDeviceList();
-      } catch (err) {
-        setFieldState(nameField, "error", err.message);
-        pushToast(ui.toastArea, err.message, "error");
-      }
-    },
+    onClick: () => openAddDeviceModal(),
   });
-  createBtn.classList.add("btn-primary");
-  createHost.append(nameField.field, createBtn);
+  addBtn.classList.add("btn-primary");
+  createHost.appendChild(addBtn);
   renderDeviceList();
+}
+
+async function openAddDeviceModal() {
+  let draft;
+  try {
+    draft = await api("/api/devices/draft", { method: "POST", body: JSON.stringify({}) });
+  } catch (err) {
+    pushToast(ui.toastArea, err.message, "error");
+    return;
+  }
+  const content = document.createElement("div");
+  const nameField = createField({ label: "Name", placeholder: "z. B. Caspar" });
+  const keyField = createField({ label: "API-Key (wird erst mit Speichern wirksam)", value: draft.api_key });
+  keyField.input.readOnly = true;
+  content.append(nameField.field, keyField.field);
+  const cancelBtn = createButton({ label: "Abbrechen" });
+  const saveBtn = createButton({ label: "Speichern", icon: "check" });
+  saveBtn.classList.add("btn-primary");
+  const modal = createModal({
+    title: "Gerät hinzufügen",
+    content,
+    actions: [cancelBtn, saveBtn],
+  });
+  cancelBtn.addEventListener("click", () => modal.close());
+  saveBtn.addEventListener("click", async () => {
+    const name = nameField.input.value.trim();
+    if (!name) {
+      setFieldState(nameField, "error", "Bitte Namen eingeben.");
+      return;
+    }
+    setFieldState(nameField, "default", "");
+    setButtonLoading(saveBtn, true, "Speichert...");
+    try {
+      await api("/api/devices/commit", {
+        method: "POST",
+        body: JSON.stringify({ draft_token: draft.draft_token, name }),
+      });
+      await loadDevices();
+      await loadDeviceStatuses();
+      renderDeviceList();
+      syncMapDeviceSelectOptions(document.getElementById("map-device"));
+      pushToast(ui.toastArea, "Gerät angelegt", "success");
+      modal.close();
+    } catch (err) {
+      setFieldState(nameField, "error", err.message);
+      pushToast(ui.toastArea, err.message, "error");
+    } finally {
+      setButtonLoading(saveBtn, false);
+    }
+  });
+  modal.open();
 }
 
 function renderDeviceList() {
@@ -480,6 +510,18 @@ function renderDeviceList() {
     info.innerHTML = `<strong>${device.name}</strong><br><small>${device.id}</small><br><small>Last Seen: ${seen}</small><br><small>Pos: ${position}</small>`;
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
+    const copyKeyBtn = createButton({
+      label: "Key kopieren",
+      icon: "content_copy",
+      onClick: async () => {
+        try {
+          await navigator.clipboard.writeText(device.api_key || "");
+          pushToast(ui.toastArea, "API-Key kopiert", "success");
+        } catch (_err) {
+          pushToast(ui.toastArea, "Kopieren nicht möglich", "error");
+        }
+      },
+    });
     const renameBtn = createButton({
       label: "Umbenennen",
       onClick: async () => {
@@ -499,7 +541,7 @@ function renderDeviceList() {
       },
     });
     deleteBtn.classList.add("btn-danger");
-    actions.append(renameBtn, rotateBtn, deleteBtn);
+    actions.append(copyKeyBtn, renameBtn, rotateBtn, deleteBtn);
     item.append(info, actions);
     list.appendChild(item);
   });
@@ -620,7 +662,10 @@ function buildSettingsPage() {
       </section>
       <section class="settings-section">
         <h3>Weiterleitung</h3>
-        <div id="settings-forwarding" class="ui-form-grid"></div>
+        <div id="settings-forwarding" class="settings-forwarding-block">
+          <div id="forwarding-add-host"></div>
+          <div id="forwardings-list" class="list ui-list"></div>
+        </div>
       </section>
       <section class="settings-section">
         <h3>Geräte</h3>
@@ -632,7 +677,7 @@ function buildSettingsPage() {
   `;
   const themeHost = page.querySelector("#settings-theme");
   const storageHost = page.querySelector("#settings-storage");
-  const forwardingHost = page.querySelector("#settings-forwarding");
+  const forwardingAddHost = page.querySelector("#forwarding-add-host");
 
   const nasInterval = createField({
     label: "NAS Intervall (Sekunden)",
@@ -640,25 +685,9 @@ function buildSettingsPage() {
     value: String(state.settings.nas_interval_seconds || 60),
   });
   const nasPath = createField({ label: "NAS Pfad", value: state.settings.nas_path || "nas_storage" });
-  const forwardingUrl = createField({ label: "Forwarding URL", value: state.settings.forwarding_url || "" });
-  const forwardingHeaders = createField({
-    label: "Forwarding Header JSON",
-    type: "textarea",
-    value: JSON.stringify(state.settings.forwarding_headers || {}, null, 2),
-  });
   const themeSelect = createField({ label: "Theme", type: "select" });
   themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
   themeSelect.input.value = state.settings.theme || "light";
-
-  const forwardingSwitch = createSwitch({
-    label: "Weiterleitung aktiv",
-    value: !!state.settings.forwarding_enabled,
-    onChange: (value) => {
-      state.settings.forwarding_enabled = value;
-      applyForwardingEnabledState();
-    },
-  });
-  forwardingSwitch.wrap.classList.add("ui-settings-switch");
 
   const saveNowBtn = createButton({
     label: "Jetzt GPS Informationen abspeichern",
@@ -683,52 +712,23 @@ function buildSettingsPage() {
     onClick: async () => {
       setButtonLoading(saveBtn, true, "Speichert...");
       try {
-        const headersRaw = forwardingHeaders.input.value.trim();
         setFieldState(nasInterval, "default", "");
-        setFieldState(forwardingUrl, "default", "");
-        setFieldState(forwardingHeaders, "default", "");
 
         const intervalValue = Number(nasInterval.input.value || 60);
         if (!Number.isFinite(intervalValue) || intervalValue < 5) {
           setFieldState(nasInterval, "error", "Intervall muss mindestens 5 Sekunden sein.");
           throw new Error("Bitte Eingaben prüfen");
         }
-        if (state.settings.forwarding_enabled && forwardingUrl.input.value.trim() === "") {
-          setFieldState(forwardingUrl, "error", "Bitte Forwarding-URL angeben.");
-          throw new Error("Bitte Eingaben prüfen");
-        }
-        if (state.settings.forwarding_enabled && !isHttpUrl(forwardingUrl.input.value.trim())) {
-          setFieldState(forwardingUrl, "error", "Forwarding-URL muss mit http:// oder https:// beginnen.");
-          throw new Error("Bitte Eingaben prüfen");
-        }
-
-        let parsedHeaders = {};
-        if (headersRaw) {
-          try {
-            parsedHeaders = JSON.parse(headersRaw);
-            if (typeof parsedHeaders !== "object" || Array.isArray(parsedHeaders) || parsedHeaders === null) {
-              throw new Error("invalid");
-            }
-          } catch (_err) {
-            setFieldState(forwardingHeaders, "error", "Header müssen valides JSON-Objekt sein.");
-            throw new Error("Bitte Eingaben prüfen");
-          }
-        }
 
         const payload = {
           nas_interval_seconds: intervalValue,
           nas_path: nasPath.input.value.trim(),
-          forwarding_enabled: !!state.settings.forwarding_enabled,
-          forwarding_url: forwardingUrl.input.value.trim(),
-          forwarding_headers: parsedHeaders,
           theme: themeSelect.input.value,
         };
         const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
         state.settings = data.settings;
         applyTheme(state.settings.theme);
         setFieldState(nasInterval, "success", "");
-        setFieldState(forwardingUrl, "success", "");
-        setFieldState(forwardingHeaders, "success", "");
         pushToast(ui.toastArea, "Einstellungen gespeichert", "success");
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
@@ -742,22 +742,177 @@ function buildSettingsPage() {
   themeSelect.input.addEventListener("change", () => applyTheme(themeSelect.input.value));
   themeHost.append(themeSelect.field);
   storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
-  forwardingHost.append(forwardingSwitch.wrap, forwardingUrl.field, forwardingHeaders.field);
+  const addFwBtn = createButton({
+    label: "Neue Weiterleitung hinzufügen",
+    icon: "add",
+    onClick: () => openForwardingModal(null),
+  });
+  addFwBtn.classList.add("btn-primary");
+  forwardingAddHost?.appendChild(addFwBtn);
+  renderForwardingList();
   const saveFooter = page.querySelector("#settings-save-footer");
   saveFooter?.appendChild(saveBtn);
-
-  function applyForwardingEnabledState() {
-    const enabled = !!state.settings.forwarding_enabled;
-    forwardingUrl.input.disabled = !enabled;
-    forwardingHeaders.input.disabled = !enabled;
-    forwardingUrl.field.classList.toggle("is-disabled", !enabled);
-    forwardingHeaders.field.classList.toggle("is-disabled", !enabled);
-  }
-  applyForwardingEnabledState();
   renderDevicesSection();
   renderSystemStatus();
   renderForwardingErrors();
   renderRecentGps();
+}
+
+function openForwardingModal(existing) {
+  const content = document.createElement("div");
+  const nameField = createField({ label: "Name", value: existing?.name || "" });
+  const urlField = createField({ label: "Forwarding-URL", value: existing?.url || "" });
+  const headersField = createField({
+    label: "Header JSON",
+    type: "textarea",
+    value: existing ? JSON.stringify(existing.headers || {}, null, 2) : "{}",
+  });
+  const ena = createSwitch({
+    label: "Aktiviert",
+    value: existing ? !!existing.enabled : true,
+    onChange: () => {},
+  });
+  content.append(nameField.field, urlField.field, headersField.field, ena.wrap);
+  const cancelBtn = createButton({ label: "Abbrechen" });
+  const primaryLabel = existing ? "Speichern" : "Hinzufügen";
+  const primaryBtn = createButton({ label: primaryLabel, icon: existing ? "check" : "add" });
+  primaryBtn.classList.add("btn-primary");
+  const modal = createModal({
+    title: existing ? "Weiterleitung bearbeiten" : "Neue Weiterleitung",
+    content,
+    actions: [cancelBtn, primaryBtn],
+  });
+  cancelBtn.addEventListener("click", () => modal.close());
+  primaryBtn.addEventListener("click", async () => {
+    let headersObj = {};
+    const raw = headersField.input.value.trim();
+    if (raw) {
+      try {
+        headersObj = JSON.parse(raw);
+        if (typeof headersObj !== "object" || Array.isArray(headersObj) || headersObj === null) {
+          throw new Error("invalid");
+        }
+      } catch (_err) {
+        setFieldState(headersField, "error", "Ungültiges JSON-Objekt.");
+        return;
+      }
+    }
+    setFieldState(headersField, "default", "");
+    const enabled = ena.toggle.classList.contains("enabled");
+    const name = nameField.input.value.trim();
+    const url = urlField.input.value.trim();
+    if (!name) {
+      setFieldState(nameField, "error", "Name erforderlich.");
+      return;
+    }
+    setFieldState(nameField, "default", "");
+    if (!url) {
+      setFieldState(urlField, "error", "URL erforderlich.");
+      return;
+    }
+    if (!isHttpUrl(url)) {
+      setFieldState(urlField, "error", "URL muss mit http:// oder https:// beginnen.");
+      return;
+    }
+    setFieldState(urlField, "default", "");
+    setButtonLoading(primaryBtn, true, "…");
+    try {
+      if (existing) {
+        await api(`/api/forwardings/${existing.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name, url, headers: headersObj, enabled }),
+        });
+      } else {
+        await api("/api/forwardings", {
+          method: "POST",
+          body: JSON.stringify({ name, url, headers: headersObj, enabled }),
+        });
+      }
+      await loadSettings();
+      renderForwardingList();
+      pushToast(ui.toastArea, existing ? "Weiterleitung gespeichert" : "Weiterleitung hinzugefügt", "success");
+      modal.close();
+    } catch (err) {
+      pushToast(ui.toastArea, err.message, "error");
+    } finally {
+      setButtonLoading(primaryBtn, false);
+    }
+  });
+  modal.open();
+}
+
+function renderForwardingList() {
+  const host = document.getElementById("forwardings-list");
+  if (!host) return;
+  host.innerHTML = "";
+  const list = state.settings?.forwardings;
+  if (!Array.isArray(list) || list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "list-item list-placeholder";
+    empty.textContent = "Keine Weiterleitungen angelegt.";
+    host.appendChild(empty);
+    return;
+  }
+  list.forEach((f) => {
+    const item = document.createElement("div");
+    item.className = "list-item list-item-managed";
+    const leading = document.createElement("div");
+    leading.className = "list-item-leading";
+    const sw = createSwitch({
+      value: !!f.enabled,
+      onChange: async (next) => {
+        try {
+          await api(`/api/forwardings/${f.id}`, { method: "PATCH", body: JSON.stringify({ enabled: next }) });
+          await loadSettings();
+          renderForwardingList();
+        } catch (err) {
+          sw.toggle.classList.toggle("enabled", !next);
+          pushToast(ui.toastArea, err.message, "error");
+        }
+      },
+    });
+    leading.appendChild(sw.wrap);
+    const body = document.createElement("div");
+    body.className = "list-item-body";
+    const t = document.createElement("strong");
+    t.textContent = f.name || "Weiterleitung";
+    const u = document.createElement("small");
+    u.textContent = f.url || "";
+    body.append(t, document.createElement("br"), u);
+    const actions = document.createElement("div");
+    actions.className = "ui-item-actions";
+    const editBtn = createButton({
+      label: "Bearbeiten",
+      onClick: () => openForwardingModal(f),
+    });
+    const delBtn = createButton({
+      label: "Löschen",
+      onClick: () => openDeleteForwardingModal(f),
+    });
+    delBtn.classList.add("btn-danger");
+    actions.append(editBtn, delBtn);
+    item.append(leading, body, actions);
+    host.appendChild(item);
+  });
+}
+
+function openDeleteForwardingModal(f) {
+  openConfirmModal({
+    title: "Weiterleitung löschen",
+    message: `Weiterleitung „${f.name}“ wirklich löschen?`,
+    confirmLabel: "Löschen",
+    onConfirm: async () => {
+      try {
+        await api(`/api/forwardings/${f.id}`, { method: "DELETE" });
+        await loadSettings();
+        renderForwardingList();
+        pushToast(ui.toastArea, "Weiterleitung gelöscht", "success");
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+        throw err;
+      }
+    },
+  });
 }
 
 function renderSystemStatus() {

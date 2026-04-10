@@ -296,7 +296,12 @@ main {
 #devices-create,
 #settings-theme,
 #settings-storage,
-#settings-forwarding {
+#forwarding-add-host {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+.settings-forwarding-block {
   display: grid;
   gap: var(--spacing-md);
 }
@@ -422,6 +427,28 @@ main {
   padding: var(--spacing-md);
   border-radius: var(--radius-md);
   background: var(--bg-elevated, var(--color-surface-elevated));
+}
+
+.list-item.list-item-managed {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--spacing-md);
+  align-items: center;
+  justify-content: initial;
+}
+
+.list-item-body {
+  min-width: 0;
+}
+
+.list-item-body small {
+  display: block;
+  word-break: break-word;
+}
+
+.list-item.list-placeholder {
+  justify-content: center;
+  opacity: 0.85;
 }
 
 .list-item > div:last-child {
@@ -601,46 +628,6 @@ main {
     grid-column: 2;
   }
 
-  #settings-forwarding > .switch {
-    display: grid;
-    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
-    gap: var(--spacing-md);
-    align-items: center;
-    width: 100%;
-  }
-
-  #settings-forwarding > .switch > span {
-    grid-column: 1;
-  }
-
-  #settings-forwarding > .switch > button {
-    grid-column: 2;
-    justify-self: start;
-  }
-
-  #settings-forwarding > .field {
-    display: grid;
-    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
-    gap: var(--spacing-md);
-    align-items: start;
-  }
-
-  #settings-forwarding > .field > span:first-child {
-    padding-top: 0.45rem;
-  }
-
-  #settings-forwarding > .field > .input,
-  #settings-forwarding > .field > .select,
-  #settings-forwarding > .field > .textarea {
-    grid-column: 2;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-  }
-
-  #settings-forwarding > .field > .field-message {
-    grid-column: 2;
-  }
 }
 
 .panel-head h3 {

@@ -25,16 +25,21 @@ export function createIconButton({ icon, title, onClick }) {
 export function createSwitch({ label, value, onChange }) {
   const wrap = document.createElement("div");
   wrap.className = "switch";
-  const text = document.createElement("span");
-  text.textContent = label;
   const btn = document.createElement("button");
+  btn.type = "button";
   if (value) btn.classList.add("enabled");
   btn.addEventListener("click", () => {
     const next = !btn.classList.contains("enabled");
     btn.classList.toggle("enabled", next);
     onChange?.(next);
   });
-  wrap.append(text, btn);
+  if (label) {
+    const text = document.createElement("span");
+    text.textContent = label;
+    wrap.append(text, btn);
+  } else {
+    wrap.append(btn);
+  }
   return { wrap, toggle: btn };
 }
 

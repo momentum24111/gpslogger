@@ -1,5 +1,7 @@
 import json
 import threading
+import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -7,13 +9,12 @@ from urllib import parse as urlparse
 
 from .utils import ensure_dir, read_json, secure_api_key, stable_device_id, utc_now_iso, write_json
 
+DEVICE_DRAFT_TTL_SEC = 900
 
 DEFAULT_SETTINGS = {
     "nas_interval_seconds": 60,
     "nas_path": "nas_storage",
-    "forwarding_enabled": False,
-    "forwarding_url": "",
-    "forwarding_headers": {},
+    "forwardings": [],
     "theme": "light",
 }
 
@@ -49,7 +50,9 @@ class AppState:
         self.last_nas_run_at: str | None = None
         self.last_nas_saved_count: int = 0
         self.last_nas_error: str | None = None
+        self._device_drafts: dict[str, tuple[float, str]] = {}
 
+        self._migrate_settings_forwardings()
         self._persist_devices()
         self._persist_settings()
         self._persist_pending()
@@ -66,6 +69,48 @@ class AppState:
 
     def _persist_statuses(self) -> None:
         write_json(self.status_path, self.device_statuses)
+
+    def _migrate_settings_forwardings(self) -> None:
+        """Legacy: eine globale Weiterleitung → Liste forwardings[]."""
+        data = self.settings
+        existing = data.get("forwardings")
+        if isinstance(existing, list) and len(existing) > 0:
+            data["forwardings"] = [self._normalize_forwarding_entry(f) for f in existing if isinstance(f, dict)]
+        else:
+            fwd_list: list[dict[str, Any]] = []
+            legacy_url = str(data.get("forwarding_url", "")).strip()
+            legacy_on = bool(data.get("forwarding_enabled"))
+            legacy_headers = data.get("forwarding_headers")
+            if legacy_url or legacy_on or (isinstance(legacy_headers, dict) and len(legacy_headers) > 0):
+                fwd_list.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "name": "Weiterleitung",
+                        "url": legacy_url,
+                        "headers": dict(legacy_headers) if isinstance(legacy_headers, dict) else {},
+                        "enabled": legacy_on and bool(legacy_url),
+                    }
+                )
+            data["forwardings"] = fwd_list
+        for k in ("forwarding_enabled", "forwarding_url", "forwarding_headers"):
+            data.pop(k, None)
+
+    def _normalize_forwarding_entry(self, raw: dict[str, Any]) -> dict[str, Any]:
+        hid = str(raw.get("id") or "").strip() or str(uuid.uuid4())
+        headers = raw.get("headers")
+        return {
+            "id": hid,
+            "name": str(raw.get("name", "")).strip() or "Weiterleitung",
+            "url": str(raw.get("url", "")).strip(),
+            "headers": dict(headers) if isinstance(headers, dict) else {},
+            "enabled": bool(raw.get("enabled")),
+        }
+
+    def _purge_device_drafts(self) -> None:
+        now = time.time()
+        dead = [k for k, (ts, _) in self._device_drafts.items() if now - ts > DEVICE_DRAFT_TTL_SEC]
+        for k in dead:
+            del self._device_drafts[k]
 
     def _append_gps_line(self, item: dict[str, Any]) -> None:
         with self.gps_path.open("a", encoding="utf-8") as handle:
@@ -96,21 +141,35 @@ class AppState:
                     "id": device.get("id"),
                     "name": device.get("name"),
                     "created_at": device.get("created_at"),
+                    "api_key": device.get("api_key"),
                 }
                 for device in self.devices
             ]
 
-    def create_device(self, name: str) -> dict[str, Any]:
+    def create_device_draft(self) -> dict[str, Any]:
         with self._lock:
-            cleaned_name = self._validate_device_name(name)
+            self._purge_device_drafts()
+            token = str(uuid.uuid4())
             key = secure_api_key()
+            self._device_drafts[token] = (time.time(), key)
+            return {"draft_token": token, "api_key": key}
+
+    def commit_device_draft(self, draft_token: str, name: str) -> dict[str, Any]:
+        with self._lock:
+            self._purge_device_drafts()
+            entry = self._device_drafts.get(str(draft_token).strip())
+            if not entry:
+                raise ValueError("Entwurf abgelaufen oder ungültig. Bitte neu öffnen.")
+            _, api_key = entry
+            cleaned_name = self._validate_device_name(name)
             device = {
-                "id": stable_device_id(cleaned_name, key),
+                "id": stable_device_id(cleaned_name, api_key),
                 "name": cleaned_name,
-                "api_key": key,
+                "api_key": api_key,
                 "created_at": utc_now_iso(),
             }
             self.devices.append(device)
+            del self._device_drafts[str(draft_token).strip()]
             self._persist_devices()
             return dict(device)
 
@@ -234,24 +293,96 @@ class AppState:
                 nas_path = str(payload["nas_path"]).strip()
                 self.settings["nas_path"] = nas_path or DEFAULT_SETTINGS["nas_path"]
 
-            if "forwarding_enabled" in payload:
-                self.settings["forwarding_enabled"] = bool(payload["forwarding_enabled"])
-
-            if "forwarding_url" in payload:
-                forward_url = str(payload["forwarding_url"]).strip()
-                if forward_url and not is_http_url(forward_url):
-                    forward_url = ""
-                self.settings["forwarding_url"] = forward_url
-
-            if "forwarding_headers" in payload:
-                headers = payload["forwarding_headers"]
-                self.settings["forwarding_headers"] = headers if isinstance(headers, dict) else {}
-
             if "theme" in payload:
                 theme = str(payload["theme"]).strip()
                 self.settings["theme"] = theme or DEFAULT_SETTINGS["theme"]
             self._persist_settings()
             return dict(self.settings)
+
+    def list_forwardings(self) -> list[dict[str, Any]]:
+        with self._lock:
+            raw = self.settings.get("forwardings")
+            if not isinstance(raw, list):
+                return []
+            return [dict(self._normalize_forwarding_entry(x)) for x in raw if isinstance(x, dict)]
+
+    def create_forwarding(self, name: str, url: str, headers: dict[str, Any], enabled: bool) -> dict[str, Any]:
+        with self._lock:
+            u = str(url).strip()
+            if not u:
+                raise ValueError("URL ist erforderlich")
+            if not is_http_url(u):
+                raise ValueError("URL muss mit http:// oder https:// beginnen")
+            n = str(name).strip() or "Weiterleitung"
+            h = dict(headers) if isinstance(headers, dict) else {}
+            entry = {
+                "id": str(uuid.uuid4()),
+                "name": n,
+                "url": u,
+                "headers": h,
+                "enabled": bool(enabled),
+            }
+            forwardings = list(self.settings.get("forwardings") or [])
+            if not isinstance(forwardings, list):
+                forwardings = []
+            forwardings.append(entry)
+            self.settings["forwardings"] = forwardings
+            self._persist_settings()
+            return dict(entry)
+
+    def update_forwarding(
+        self, forward_id: str, name: str, url: str, headers: dict[str, Any], enabled: bool
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            u = str(url).strip()
+            if not u:
+                raise ValueError("URL ist erforderlich")
+            if not is_http_url(u):
+                raise ValueError("URL muss mit http:// oder https:// beginnen")
+            n = str(name).strip() or "Weiterleitung"
+            h = dict(headers) if isinstance(headers, dict) else {}
+            forwardings = list(self.settings.get("forwardings") or [])
+            if not isinstance(forwardings, list):
+                return None
+            for i, f in enumerate(forwardings):
+                if isinstance(f, dict) and str(f.get("id")) == str(forward_id):
+                    forwardings[i] = {
+                        "id": str(forward_id),
+                        "name": n,
+                        "url": u,
+                        "headers": h,
+                        "enabled": bool(enabled),
+                    }
+                    self.settings["forwardings"] = forwardings
+                    self._persist_settings()
+                    return dict(forwardings[i])
+            return None
+
+    def delete_forwarding(self, forward_id: str) -> bool:
+        with self._lock:
+            forwardings = list(self.settings.get("forwardings") or [])
+            if not isinstance(forwardings, list):
+                return False
+            before = len(forwardings)
+            forwardings = [f for f in forwardings if not (isinstance(f, dict) and str(f.get("id")) == str(forward_id))]
+            if len(forwardings) == before:
+                return False
+            self.settings["forwardings"] = forwardings
+            self._persist_settings()
+            return True
+
+    def set_forwarding_enabled(self, forward_id: str, enabled: bool) -> dict[str, Any] | None:
+        with self._lock:
+            forwardings = list(self.settings.get("forwardings") or [])
+            if not isinstance(forwardings, list):
+                return None
+            for f in forwardings:
+                if isinstance(f, dict) and str(f.get("id")) == str(forward_id):
+                    f["enabled"] = bool(enabled)
+                    self.settings["forwardings"] = forwardings
+                    self._persist_settings()
+                    return dict(self._normalize_forwarding_entry(f))
+            return None
 
     def store_gps_request(self, payload: dict[str, Any]) -> None:
         with self._lock:
