@@ -36,11 +36,7 @@ const state = {
   selectedDeviceId: localStorage.getItem("gpslogger.selectedDeviceId") || "",
 };
 
-function isIsoDateTime(value) {
-  if (!value) return true;
-  const parsed = new Date(value);
-  return !Number.isNaN(parsed.getTime());
-}
+const PAGE_IDS = new Set(["map", "settings"]);
 
 function isHttpUrl(value) {
   if (!value) return false;
@@ -71,7 +67,9 @@ async function bootstrap() {
   buildTabs();
   buildMapPage();
   buildSettingsPage();
-  showPage("map");
+  initRouting();
+  const brandHome = document.getElementById("brand-home");
+  brandHome?.addEventListener("click", () => showPage("map"));
   await refreshMapData();
   startAutoRefresh();
   document.addEventListener("visibilitychange", () => {
@@ -81,6 +79,18 @@ async function bootstrap() {
       runAutoRefreshCycle();
       startAutoRefresh();
     }
+  });
+}
+
+function normalizeHashPage() {
+  const raw = window.location.hash.replace(/^#/, "").trim();
+  return PAGE_IDS.has(raw) ? raw : "map";
+}
+
+function initRouting() {
+  showPage(normalizeHashPage(), { updateHash: true });
+  window.addEventListener("hashchange", () => {
+    showPage(normalizeHashPage(), { updateHash: false });
   });
 }
 
@@ -106,7 +116,7 @@ function buildTabs() {
   });
 }
 
-function showPage(pageId) {
+function showPage(pageId, { updateHash = true } = {}) {
   ui.activePage = pageId;
   document.querySelectorAll(".page").forEach((page) => {
     page.classList.toggle("active", page.id === `page-${pageId}`);
@@ -114,6 +124,10 @@ function showPage(pageId) {
   document.querySelectorAll("#tabs .btn").forEach((btn) => {
     btn.classList.toggle("selected", btn.dataset.page === pageId);
   });
+  if (updateHash) {
+    const target = `#${pageId}`;
+    if (window.location.hash !== target) window.location.hash = target;
+  }
   if (pageId === "map" && ui.map) {
     setTimeout(() => ui.map.invalidateSize(), 100);
   }
@@ -580,8 +594,42 @@ function openRotateKeyModal(device) {
 
 function buildSettingsPage() {
   const page = document.getElementById("page-settings");
-  page.innerHTML = `<div class="card ui-panel"><div id="settings-host" class="ui-form-grid"></div></div><div class="card ui-panel"><div class="panel-head"><h3>Geräte</h3></div><div id="devices-create" class="ui-form-grid"></div></div><div class="card ui-panel"><div id="devices-list" class="list ui-list"></div></div><div class="card ui-panel"><div id="settings-system-status"></div></div><div class="card ui-panel"><div id="settings-forwarding-errors"></div></div><div class="card ui-panel"><div id="settings-recent-gps"></div></div>`;
-  const host = page.querySelector("#settings-host");
+  page.innerHTML = `
+    <div class="card settings-card">
+      <section class="settings-section">
+        <h3>Theme</h3>
+        <div id="settings-theme" class="ui-form-grid"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Speicherung</h3>
+        <div id="settings-storage" class="ui-form-grid"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Weiterleitung</h3>
+        <div id="settings-forwarding" class="ui-form-grid"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Geräte</h3>
+        <div id="devices-create" class="ui-form-grid"></div>
+        <div id="devices-list" class="list ui-list"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Systemstatus</h3>
+        <div id="settings-system-status"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Forwarding Fehler</h3>
+        <div id="settings-forwarding-errors"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Letzte GPS Requests</h3>
+        <div id="settings-recent-gps"></div>
+      </section>
+    </div>
+  `;
+  const themeHost = page.querySelector("#settings-theme");
+  const storageHost = page.querySelector("#settings-storage");
+  const forwardingHost = page.querySelector("#settings-forwarding");
 
   const nasInterval = createField({
     label: "NAS Intervall (Sekunden)",
@@ -604,6 +652,7 @@ function buildSettingsPage() {
     value: !!state.settings.forwarding_enabled,
     onChange: (value) => {
       state.settings.forwarding_enabled = value;
+      applyForwardingEnabledState();
     },
   });
   forwardingSwitch.wrap.classList.add("ui-settings-switch");
@@ -688,16 +737,18 @@ function buildSettingsPage() {
   saveBtn.classList.add("btn-primary");
 
   themeSelect.input.addEventListener("change", () => applyTheme(themeSelect.input.value));
-  host.append(
-    nasInterval.field,
-    nasPath.field,
-    forwardingSwitch.wrap,
-    forwardingUrl.field,
-    forwardingHeaders.field,
-    themeSelect.field,
-    saveNowBtn,
-    saveBtn,
-  );
+  themeHost.append(themeSelect.field);
+  storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
+  forwardingHost.append(forwardingSwitch.wrap, forwardingUrl.field, forwardingHeaders.field, saveBtn);
+
+  function applyForwardingEnabledState() {
+    const enabled = !!state.settings.forwarding_enabled;
+    forwardingUrl.input.disabled = !enabled;
+    forwardingHeaders.input.disabled = !enabled;
+    forwardingUrl.field.classList.toggle("is-disabled", !enabled);
+    forwardingHeaders.field.classList.toggle("is-disabled", !enabled);
+  }
+  applyForwardingEnabledState();
   renderDevicesSection();
   renderSystemStatus();
   renderForwardingErrors();
@@ -715,7 +766,6 @@ function renderSystemStatus() {
   const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString("de-DE") : "Noch kein Lauf";
   const lastNasError = status.last_nas_error || "Kein Fehler";
   host.innerHTML = `
-    <h3>Systemstatus</h3>
     <div class="list">
       <div class="list-item"><span>Uptime</span><strong>${h}h ${m}m ${s}s</strong></div>
       <div class="list-item"><span>Geräte</span><strong>${status.device_count ?? 0}</strong></div>
@@ -743,7 +793,6 @@ function renderForwardingErrors() {
     : `<div class="list-item"><span>Keine Forwarding-Fehler</span></div>`;
   host.innerHTML = `
     <div class="panel-head">
-      <h3>Forwarding Fehler</h3>
       <div class="panel-actions">
         <button id="reload-forwarding-errors" class="btn">Neu laden</button>
         <button id="clear-forwarding-errors" class="btn">Leeren</button>
@@ -785,7 +834,6 @@ function renderRecentGps() {
     .join("");
   host.innerHTML = `
     <div class="panel-head">
-      <h3>Letzte GPS-Requests</h3>
       <div class="panel-actions">
         <button id="reload-recent-gps" class="btn">Neu laden</button>
       </div>
