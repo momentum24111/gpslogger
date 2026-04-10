@@ -136,6 +136,52 @@ def sanitize_forward_headers(headers: dict) -> dict:
     return cleaned
 
 
+BUDDY_SOURCE_HEADER_NAMES = (
+    "x-http-buddy",
+    "http-buddy",
+    "buddy",
+)
+
+
+def lookup_header_ci(headers: dict, names: tuple[str, ...]) -> str | None:
+    lower_map = {str(k).lower(): v for k, v in headers.items()}
+    for name in names:
+        key = name.lower()
+        if key in lower_map:
+            val = lower_map[key]
+            if val is None:
+                return None
+            text = str(val).strip()
+            return text if text else None
+    return None
+
+
+def build_outgoing_forward_headers(fwd: dict, source_headers: dict) -> dict:
+    source_headers = sanitize_forward_headers(source_headers or {})
+    merge_in = fwd.get("merge_incoming_headers")
+    if merge_in is None:
+        merge_in = True
+    else:
+        merge_in = bool(merge_in)
+    if merge_in:
+        headers: dict[str, str] = dict(source_headers)
+    else:
+        headers = {}
+        ct = lookup_header_ci(source_headers, ("content-type",))
+        if ct:
+            headers["Content-Type"] = ct
+    headers.update(sanitize_forward_headers(fwd.get("headers") or {}))
+    if fwd.get("http_buddy_from_source"):
+        buddy = lookup_header_ci(source_headers, BUDDY_SOURCE_HEADER_NAMES)
+        if buddy:
+            headers["X-HTTP-Buddy"] = buddy
+    else:
+        buddy = str(fwd.get("http_buddy") or "").strip()
+        if buddy:
+            headers["X-HTTP-Buddy"] = buddy
+    return headers
+
+
 def is_http_url(value: str) -> bool:
     try:
         parsed = urlparse.urlparse(value)
@@ -153,15 +199,14 @@ def forwarding_worker():
             if not isinstance(forwardings, list):
                 continue
             payload_bytes = item.get("raw_body", "").encode("utf-8")
-            request_headers = sanitize_forward_headers(item.get("headers", {}))
+            raw_in_headers = item.get("headers") or {}
             for fwd in forwardings:
                 if not isinstance(fwd, dict) or not fwd.get("enabled"):
                     continue
                 url = str(fwd.get("url", "")).strip()
                 if not url or not is_http_url(url):
                     continue
-                headers = dict(request_headers)
-                headers.update(sanitize_forward_headers(fwd.get("headers") or {}))
+                headers = build_outgoing_forward_headers(fwd, raw_in_headers)
                 try:
                     req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
                     with urlrequest.urlopen(req, timeout=6):
@@ -414,8 +459,22 @@ class Handler(BaseHTTPRequestHandler):
             headers_raw = body.get("headers")
             headers = headers_raw if isinstance(headers_raw, dict) else {}
             enabled = bool(body.get("enabled", True))
+            merge_raw = body.get("merge_incoming_headers")
+            merge_incoming = True if merge_raw is None else bool(merge_raw)
+            hb_src = bool(body.get("http_buddy_from_source", False))
+            hb = body.get("http_buddy")
+            if hb is not None and not isinstance(hb, str):
+                return json_response(self, {"error": "http_buddy muss ein Text sein"}, HTTPStatus.BAD_REQUEST)
             try:
-                forwarding = state.create_forwarding(name, url, headers, enabled)
+                forwarding = state.create_forwarding(
+                    name,
+                    url,
+                    headers,
+                    enabled,
+                    merge_incoming_headers=merge_incoming,
+                    http_buddy=str(hb or ""),
+                    http_buddy_from_source=hb_src,
+                )
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return json_response(self, {"forwarding": forwarding}, HTTPStatus.CREATED)
@@ -459,8 +518,23 @@ class Handler(BaseHTTPRequestHandler):
             headers_raw = body.get("headers")
             headers = headers_raw if isinstance(headers_raw, dict) else {}
             enabled = bool(body.get("enabled", True))
+            merge_raw = body.get("merge_incoming_headers")
+            merge_incoming = True if merge_raw is None else bool(merge_raw)
+            hb_src = bool(body.get("http_buddy_from_source", False))
+            hb = body.get("http_buddy")
+            if hb is not None and not isinstance(hb, str):
+                return json_response(self, {"error": "http_buddy muss ein Text sein"}, HTTPStatus.BAD_REQUEST)
             try:
-                updated = state.update_forwarding(forward_id, name, url, headers, enabled)
+                updated = state.update_forwarding(
+                    forward_id,
+                    name,
+                    url,
+                    headers,
+                    enabled,
+                    merge_incoming_headers=merge_incoming,
+                    http_buddy=str(hb or ""),
+                    http_buddy_from_source=hb_src,
+                )
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             if not updated:

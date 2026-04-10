@@ -98,12 +98,19 @@ class AppState:
     def _normalize_forwarding_entry(self, raw: dict[str, Any]) -> dict[str, Any]:
         hid = str(raw.get("id") or "").strip() or str(uuid.uuid4())
         headers = raw.get("headers")
+        if raw.get("merge_incoming_headers") is None:
+            merge_in = True
+        else:
+            merge_in = bool(raw.get("merge_incoming_headers"))
         return {
             "id": hid,
             "name": str(raw.get("name", "")).strip() or "Weiterleitung",
             "url": str(raw.get("url", "")).strip(),
             "headers": dict(headers) if isinstance(headers, dict) else {},
             "enabled": bool(raw.get("enabled")),
+            "merge_incoming_headers": merge_in,
+            "http_buddy": str(raw.get("http_buddy", "")).strip(),
+            "http_buddy_from_source": bool(raw.get("http_buddy_from_source")),
         }
 
     def _purge_device_drafts(self) -> None:
@@ -375,7 +382,17 @@ class AppState:
                 return []
             return [dict(self._normalize_forwarding_entry(x)) for x in raw if isinstance(x, dict)]
 
-    def create_forwarding(self, name: str, url: str, headers: dict[str, Any], enabled: bool) -> dict[str, Any]:
+    def create_forwarding(
+        self,
+        name: str,
+        url: str,
+        headers: dict[str, Any],
+        enabled: bool,
+        *,
+        merge_incoming_headers: bool = True,
+        http_buddy: str = "",
+        http_buddy_from_source: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
             u = str(url).strip()
             if not u:
@@ -390,6 +407,9 @@ class AppState:
                 "url": u,
                 "headers": h,
                 "enabled": bool(enabled),
+                "merge_incoming_headers": bool(merge_incoming_headers),
+                "http_buddy": str(http_buddy).strip(),
+                "http_buddy_from_source": bool(http_buddy_from_source),
             }
             forwardings = list(self.settings.get("forwardings") or [])
             if not isinstance(forwardings, list):
@@ -397,10 +417,19 @@ class AppState:
             forwardings.append(entry)
             self.settings["forwardings"] = forwardings
             self._persist_settings()
-            return dict(entry)
+            return dict(self._normalize_forwarding_entry(entry))
 
     def update_forwarding(
-        self, forward_id: str, name: str, url: str, headers: dict[str, Any], enabled: bool
+        self,
+        forward_id: str,
+        name: str,
+        url: str,
+        headers: dict[str, Any],
+        enabled: bool,
+        *,
+        merge_incoming_headers: bool = True,
+        http_buddy: str = "",
+        http_buddy_from_source: bool = False,
     ) -> dict[str, Any] | None:
         with self._lock:
             u = str(url).strip()
@@ -421,10 +450,13 @@ class AppState:
                         "url": u,
                         "headers": h,
                         "enabled": bool(enabled),
+                        "merge_incoming_headers": bool(merge_incoming_headers),
+                        "http_buddy": str(http_buddy).strip(),
+                        "http_buddy_from_source": bool(http_buddy_from_source),
                     }
                     self.settings["forwardings"] = forwardings
                     self._persist_settings()
-                    return dict(forwardings[i])
+                    return dict(self._normalize_forwarding_entry(forwardings[i]))
             return None
 
     def delete_forwarding(self, forward_id: str) -> bool:

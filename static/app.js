@@ -797,17 +797,53 @@ function openForwardingModal(existing) {
   const content = document.createElement("div");
   const nameField = createField({ label: "Name", value: existing?.name || "" });
   const urlField = createField({ label: "Forwarding-URL", value: existing?.url || "" });
+  const mergeIncoming =
+    existing == null || existing.merge_incoming_headers !== false;
+  const mergeHdrSw = createSwitch({
+    label:
+      "Eingehende HTTP-Header der Geräte-Anfrage mit übernehmen (Basis; JSON unten ergänzt/überschreibt)",
+    value: mergeIncoming,
+    onChange: () => {},
+  });
   const headersField = createField({
-    label: "Header JSON",
+    label: "Zusätzliche Header (JSON)",
     type: "textarea",
     value: existing ? JSON.stringify(existing.headers || {}, null, 2) : "{}",
+    placeholder: '{"X-Custom": "…"}',
+  });
+  const buddyFromSrc = !!existing?.http_buddy_from_source;
+  const buddyField = createField({
+    label: "HTTP-Buddy (Header X-HTTP-Buddy)",
+    value: existing?.http_buddy || "",
+    placeholder: "Nur wenn nicht aus Quelle",
+  });
+  if (buddyFromSrc) {
+    buddyField.field.classList.add("is-disabled");
+    buddyField.input.disabled = true;
+  }
+  const buddyFromSw = createSwitch({
+    label:
+      "HTTP-Buddy aus eingehender Anfrage übernehmen (erkennt X-HTTP-Buddy, HTTP-Buddy oder Buddy)",
+    value: buddyFromSrc,
+    onChange: (next) => {
+      buddyField.input.disabled = next;
+      buddyField.field.classList.toggle("is-disabled", next);
+    },
   });
   const ena = createSwitch({
     label: "Aktiviert",
     value: existing ? !!existing.enabled : true,
     onChange: () => {},
   });
-  content.append(nameField.field, urlField.field, headersField.field, ena.wrap);
+  content.append(
+    nameField.field,
+    urlField.field,
+    mergeHdrSw.wrap,
+    headersField.field,
+    buddyField.field,
+    buddyFromSw.wrap,
+    ena.wrap,
+  );
   const cancelBtn = createButton({ label: "Abbrechen" });
   const primaryLabel = existing ? "Speichern" : "Hinzufügen";
   const primaryBtn = createButton({ label: primaryLabel, icon: existing ? "check" : "add" });
@@ -851,16 +887,35 @@ function openForwardingModal(existing) {
     }
     setFieldState(urlField, "default", "");
     setButtonLoading(primaryBtn, true, "…");
+    const merge_incoming_headers = mergeHdrSw.toggle.classList.contains("enabled");
+    const http_buddy_from_source = buddyFromSw.toggle.classList.contains("enabled");
+    const http_buddy = http_buddy_from_source ? "" : buddyField.input.value.trim();
     try {
       if (existing) {
         await api(`/api/forwardings/${existing.id}`, {
           method: "PUT",
-          body: JSON.stringify({ name, url, headers: headersObj, enabled }),
+          body: JSON.stringify({
+            name,
+            url,
+            headers: headersObj,
+            enabled,
+            merge_incoming_headers,
+            http_buddy,
+            http_buddy_from_source,
+          }),
         });
       } else {
         await api("/api/forwardings", {
           method: "POST",
-          body: JSON.stringify({ name, url, headers: headersObj, enabled }),
+          body: JSON.stringify({
+            name,
+            url,
+            headers: headersObj,
+            enabled,
+            merge_incoming_headers,
+            http_buddy,
+            http_buddy_from_source,
+          }),
         });
       }
       await loadSettings();
@@ -913,7 +968,15 @@ function renderForwardingList() {
     t.textContent = f.name || "Weiterleitung";
     const u = document.createElement("small");
     u.textContent = f.url || "";
+    const meta = document.createElement("small");
+    meta.className = "list-item-meta";
+    const bits = [];
+    if (f.merge_incoming_headers === false) bits.push("nur Zusatz-Header");
+    if (f.http_buddy_from_source) bits.push("Buddy aus Quelle");
+    else if (f.http_buddy) bits.push("Buddy manuell");
+    meta.textContent = bits.length ? bits.join(" · ") : "";
     body.append(t, document.createElement("br"), u);
+    if (meta.textContent) body.append(document.createElement("br"), meta);
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
     const editBtn = createButton({

@@ -748,6 +748,27 @@ def build_openapi_spec() -> dict:
                         "url": {"type": "string", "format": "uri"},
                         "headers": {"type": "object", "additionalProperties": {"type": "string"}},
                         "enabled": {"type": "boolean", "default": True},
+                        "merge_incoming_headers": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": (
+                                "Wenn true: alle sanitisierten Header der Geräte-Anfrage als Basis, "
+                                "Zusatz-Header (JSON) überschreiben gleichnamige Keys. "
+                                "Wenn false: nur Zusatz-Header plus Content-Type vom Original (für den POST-Body)."
+                            ),
+                        },
+                        "http_buddy": {
+                            "type": "string",
+                            "description": "Manueller Wert für den Header X-HTTP-Buddy (wenn http_buddy_from_source false ist)",
+                        },
+                        "http_buddy_from_source": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "Wenn true: Wert aus eingehender Anfrage (Header X-HTTP-Buddy, HTTP-Buddy oder Buddy), "
+                                "ausgehend als X-HTTP-Buddy gesetzt."
+                            ),
+                        },
                     },
                     "required": ["name", "url"],
                 },
