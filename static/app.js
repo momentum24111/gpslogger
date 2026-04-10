@@ -472,8 +472,11 @@ async function openAddDeviceModal() {
   }
   const content = document.createElement("div");
   const nameField = createField({ label: "Name", placeholder: "z. B. Caspar" });
-  const keyField = createField({ label: "API-Key (wird erst mit Speichern wirksam)", value: draft.api_key });
-  keyField.input.readOnly = true;
+  const keyField = createField({
+    label: "API-Key (Vorschlag editierbar, z. B. kürzerer Key; min. 8 Zeichen, keine Leerzeichen)",
+    value: draft.api_key,
+    placeholder: "Key anpassen oder Vorschlag belassen",
+  });
   content.append(nameField.field, keyField.field);
   const cancelBtn = createButton({ label: "Abbrechen" });
   const saveBtn = createButton({ label: "Speichern", icon: "check" });
@@ -495,7 +498,11 @@ async function openAddDeviceModal() {
     try {
       await api("/api/devices/commit", {
         method: "POST",
-        body: JSON.stringify({ draft_token: draft.draft_token, name }),
+        body: JSON.stringify({
+          draft_token: draft.draft_token,
+          name,
+          api_key: keyField.input.value.trim() || undefined,
+        }),
       });
       await loadDevices();
       await loadDeviceStatuses();

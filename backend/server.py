@@ -391,8 +391,11 @@ class Handler(BaseHTTPRequestHandler):
             name = str(body.get("name", "")).strip()
             if not token or not name:
                 return json_response(self, {"error": "draft_token und name sind erforderlich"}, HTTPStatus.BAD_REQUEST)
+            override_key = body.get("api_key")
+            if override_key is not None and not isinstance(override_key, str):
+                return json_response(self, {"error": "api_key muss ein Text sein"}, HTTPStatus.BAD_REQUEST)
             try:
-                device = state.commit_device_draft(token, name)
+                device = state.commit_device_draft(token, name, api_key_override=override_key)
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return json_response(self, {"device": device}, HTTPStatus.CREATED)

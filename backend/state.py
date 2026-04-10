@@ -201,18 +201,40 @@ class AppState:
             self._device_drafts[token] = (time.time(), key)
             return {"draft_token": token, "api_key": key}
 
-    def commit_device_draft(self, draft_token: str, name: str) -> dict[str, Any]:
+    def _validate_new_device_api_key(self, key: str) -> str:
+        k = str(key).strip()
+        if not k:
+            raise ValueError("API-Key darf nicht leer sein")
+        if len(k) < 8:
+            raise ValueError("API-Key muss mindestens 8 Zeichen haben")
+        if len(k) > 128:
+            raise ValueError("API-Key darf maximal 128 Zeichen lang sein")
+        if any(c.isspace() for c in k):
+            raise ValueError("API-Key darf keine Leerzeichen enthalten")
+        for d in self.devices:
+            if d.get("api_key") == k:
+                raise ValueError("Dieser API-Key ist bereits vergeben")
+        return k
+
+    def commit_device_draft(
+        self, draft_token: str, name: str, api_key_override: str | None = None
+    ) -> dict[str, Any]:
         with self._lock:
             self._purge_device_drafts()
             entry = self._device_drafts.get(str(draft_token).strip())
             if not entry:
                 raise ValueError("Entwurf abgelaufen oder ungültig. Bitte neu öffnen.")
-            _, api_key = entry
+            _, draft_key = entry
             cleaned_name = self._validate_device_name(name)
+            override = str(api_key_override).strip() if api_key_override is not None else ""
+            if override:
+                final_key = self._validate_new_device_api_key(override)
+            else:
+                final_key = draft_key
             device = {
-                "id": stable_device_id(cleaned_name, api_key),
+                "id": stable_device_id(cleaned_name, final_key),
                 "name": cleaned_name,
-                "api_key": api_key,
+                "api_key": final_key,
                 "created_at": utc_now_iso(),
             }
             self.devices.append(device)

@@ -165,6 +165,14 @@ def build_openapi_spec() -> dict:
                                     "properties": {
                                         "draft_token": {"type": "string"},
                                         "name": {"type": "string", "description": "Anzeigename des Geräts"},
+                                        "api_key": {
+                                            "type": "string",
+                                            "description": (
+                                                "Optional: eigener API-Key statt des Draft-Vorschlags; "
+                                                "8–128 Zeichen, keine Leerzeichen, muss systemweit eindeutig sein. "
+                                                "Feld weglassen oder leer lassen für den generierten Vorschlag."
+                                            ),
+                                        },
                                     },
                                 }
                             }
