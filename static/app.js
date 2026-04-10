@@ -22,6 +22,7 @@ const ui = {
   showHistory: (localStorage.getItem("gpslogger.map.showHistory") || "true") === "true",
   activePage: "map",
   autoRefreshHandle: null,
+  mapRange: localStorage.getItem("gpslogger.map.range") || "24h",
 };
 
 const state = {
@@ -69,7 +70,6 @@ async function bootstrap() {
   applyTheme(state.settings.theme || "light");
   buildTabs();
   buildMapPage();
-  buildDevicesPage();
   buildSettingsPage();
   showPage("map");
   await refreshMapData();
@@ -90,7 +90,6 @@ function buildTabs() {
   tabs.classList.add("ui-nav");
   [
     { id: "map", label: "Karte", icon: "map" },
-    { id: "devices", label: "Geräte", icon: "devices" },
     { id: "settings", label: "Einstellungen", icon: "settings" },
   ].forEach((tab) => {
     const host = document.createElement("div");
@@ -125,15 +124,13 @@ async function runAutoRefreshCycle() {
     if (ui.activePage === "map") {
       await refreshMapData();
     }
-    if (ui.activePage === "devices") {
+    if (ui.activePage === "settings") {
       await loadDevices();
       await loadDeviceStatuses();
-      renderDeviceList();
-    }
-    if (ui.activePage === "settings") {
       await loadSystemStatus();
       await loadForwardingErrors();
       await loadRecentGps();
+      renderDeviceList();
       renderSystemStatus();
       renderForwardingErrors();
       renderRecentGps();
@@ -169,18 +166,57 @@ function syncMapDeviceSelectOptions(selectElement) {
 
 function buildMapPage() {
   const page = document.getElementById("page-map");
-  page.innerHTML = `<div class="card ui-panel"><div id="map-filters" class="ui-form-grid"></div><div id="map-actions" class="ui-actions-row"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div>`;
+  page.innerHTML = `<div class="map-layout"><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div><div id="map-actions" class="ui-actions-row"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
 
   const filtersHost = page.querySelector("#map-filters");
   const deviceField = createField({ label: "Gerät", type: "select" });
   deviceField.input.id = "map-device";
-  const fromField = createField({ label: "Von (ISO)", placeholder: "2026-04-08T00:00:00Z" });
+  const rangeField = document.createElement("div");
+  rangeField.className = "field";
+  const rangeLabel = document.createElement("span");
+  rangeLabel.textContent = "Zeitraum";
+  const rangePicker = document.createElement("div");
+  rangePicker.className = "segmented map-range-picker";
+  const ranges = [
+    { value: "1h", label: "Letzte Stunde" },
+    { value: "6h", label: "Letzte 6 Stunden" },
+    { value: "24h", label: "Letzte 24 Stunden" },
+    { value: "7d", label: "Letzte Woche" },
+    { value: "30d", label: "Letzte 30 Tage" },
+    { value: "custom", label: "Custom" },
+  ];
+  ranges.forEach((entry) => {
+    const id = `range-${entry.value}`;
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "map-range";
+    input.id = id;
+    input.value = entry.value;
+    input.checked = ui.mapRange === entry.value;
+    const label = document.createElement("label");
+    label.setAttribute("for", id);
+    label.textContent = entry.label;
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      ui.mapRange = entry.value;
+      localStorage.setItem("gpslogger.map.range", ui.mapRange);
+      customDateWrap.hidden = ui.mapRange !== "custom";
+      refreshMapData({ reloadBtn, fromField, toField });
+    });
+    rangePicker.append(input, label);
+  });
+  rangeField.append(rangeLabel, rangePicker);
+  const customDateWrap = document.createElement("div");
+  customDateWrap.className = "map-custom-dates";
+  const fromField = createField({ label: "Von Datum", type: "date" });
   fromField.input.id = "map-from";
-  fromField.input.value = localStorage.getItem("gpslogger.map.from") || "";
-  const toField = createField({ label: "Bis (ISO)", placeholder: "2026-04-08T23:59:59Z" });
+  fromField.input.value = localStorage.getItem("gpslogger.map.fromDate") || "";
+  const toField = createField({ label: "Bis Datum", type: "date" });
   toField.input.id = "map-to";
-  toField.input.value = localStorage.getItem("gpslogger.map.to") || "";
-  filtersHost.append(deviceField.field, fromField.field, toField.field);
+  toField.input.value = localStorage.getItem("gpslogger.map.toDate") || "";
+  customDateWrap.append(fromField.field, toField.field);
+  customDateWrap.hidden = ui.mapRange !== "custom";
+  filtersHost.append(deviceField.field, rangeField, customDateWrap);
 
   const actionHost = page.querySelector("#map-actions");
   const reloadBtn = createButton({
@@ -201,20 +237,22 @@ function buildMapPage() {
     refreshMapData({ fromField, toField, reloadBtn });
   });
   fromField.input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && ui.mapRange === "custom") {
       refreshMapData({ fromField, toField, reloadBtn });
     }
   });
   toField.input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && ui.mapRange === "custom") {
       refreshMapData({ fromField, toField, reloadBtn });
     }
   });
   fromField.input.addEventListener("change", () => {
-    localStorage.setItem("gpslogger.map.from", fromField.input.value || "");
+    localStorage.setItem("gpslogger.map.fromDate", fromField.input.value || "");
+    if (ui.mapRange === "custom") refreshMapData({ fromField, toField, reloadBtn });
   });
   toField.input.addEventListener("change", () => {
-    localStorage.setItem("gpslogger.map.to", toField.input.value || "");
+    localStorage.setItem("gpslogger.map.toDate", toField.input.value || "");
+    if (ui.mapRange === "custom") refreshMapData({ fromField, toField, reloadBtn });
   });
 
   ui.map = L.map("map", { zoomControl: true, scrollWheelZoom: true, touchZoom: true }).setView([51.2, 10.4], 6);
@@ -270,27 +308,21 @@ function setMapMode(mode) {
 async function refreshMapData(opts = {}) {
   const fromInput = document.getElementById("map-from");
   const toInput = document.getElementById("map-to");
-  const from = fromInput?.value || "";
-  const to = toInput?.value || "";
-  localStorage.setItem("gpslogger.map.from", from);
-  localStorage.setItem("gpslogger.map.to", to);
+  const { from, to, error } = resolveRangeQuery(
+    ui.mapRange,
+    fromInput?.value || "",
+    toInput?.value || "",
+  );
+  if (fromInput) localStorage.setItem("gpslogger.map.fromDate", fromInput.value || "");
+  if (toInput) localStorage.setItem("gpslogger.map.toDate", toInput.value || "");
   const fromField = opts.fromField || (fromInput ? { field: fromInput.closest(".field"), input: fromInput, message: fromInput.closest(".field")?.querySelector(".field-message") } : null);
   const toField = opts.toField || (toInput ? { field: toInput.closest(".field"), input: toInput, message: toInput.closest(".field")?.querySelector(".field-message") } : null);
 
   setFieldState(fromField, "default", "");
   setFieldState(toField, "default", "");
-
-  if (!isIsoDateTime(from)) {
-    setFieldState(fromField, "error", "Ungültiges ISO-Datum.");
-    return;
-  }
-  if (!isIsoDateTime(to)) {
-    setFieldState(toField, "error", "Ungültiges ISO-Datum.");
-    return;
-  }
-  if (from && to && new Date(from).getTime() > new Date(to).getTime()) {
-    setFieldState(fromField, "error", "Von darf nicht nach Bis liegen.");
-    setFieldState(toField, "error", "Bis muss nach Von liegen.");
+  if (error) {
+    setFieldState(fromField, "error", error);
+    setFieldState(toField, "error", error);
     return;
   }
 
@@ -314,6 +346,34 @@ async function refreshMapData(opts = {}) {
       setButtonLoading(opts.reloadBtn, false);
     }
   }
+}
+
+function resolveRangeQuery(range, customFrom, customTo) {
+  const now = new Date();
+  if (range === "custom") {
+    if (!customFrom || !customTo) {
+      return { from: "", to: "", error: "Bitte Von- und Bis-Datum setzen." };
+    }
+    const fromDate = new Date(`${customFrom}T00:00:00`);
+    const toDate = new Date(`${customTo}T23:59:59.999`);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+      return { from: "", to: "", error: "Ungültiges Datum." };
+    }
+    if (fromDate.getTime() > toDate.getTime()) {
+      return { from: "", to: "", error: "Von darf nicht nach Bis liegen." };
+    }
+    return { from: fromDate.toISOString(), to: toDate.toISOString(), error: "" };
+  }
+  const map = {
+    "1h": 60 * 60 * 1000,
+    "6h": 6 * 60 * 60 * 1000,
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+  };
+  const delta = map[range] || map["24h"];
+  const fromDate = new Date(now.getTime() - delta);
+  return { from: fromDate.toISOString(), to: now.toISOString(), error: "" };
 }
 
 function drawPositions(positions) {
@@ -350,10 +410,12 @@ function drawPositions(positions) {
   if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
 }
 
-function buildDevicesPage() {
-  const page = document.getElementById("page-devices");
-  page.innerHTML = `<div class="card ui-panel"><div id="devices-create" class="ui-form-grid"></div></div><div class="card ui-panel"><div id="devices-list" class="list ui-list"></div></div>`;
-  const createHost = page.querySelector("#devices-create");
+function renderDevicesSection() {
+  const createHost = document.getElementById("devices-create");
+  const listHost = document.getElementById("devices-list");
+  if (!createHost || !listHost) return;
+  createHost.innerHTML = "";
+  listHost.innerHTML = "";
   const nameField = createField({ label: "Neues Gerät", placeholder: "z. B. Caspar" });
   const createBtn = createButton({
     label: "Gerät hinzufügen",
@@ -518,7 +580,7 @@ function openRotateKeyModal(device) {
 
 function buildSettingsPage() {
   const page = document.getElementById("page-settings");
-  page.innerHTML = `<div class="card ui-panel"><div id="settings-system-status"></div></div><div class="card ui-panel"><div id="settings-forwarding-errors"></div></div><div class="card ui-panel"><div id="settings-recent-gps"></div></div><div class="card ui-panel"><div id="settings-host" class="ui-form-grid"></div></div>`;
+  page.innerHTML = `<div class="card ui-panel"><div id="settings-host" class="ui-form-grid"></div></div><div class="card ui-panel"><div class="panel-head"><h3>Geräte</h3></div><div id="devices-create" class="ui-form-grid"></div></div><div class="card ui-panel"><div id="devices-list" class="list ui-list"></div></div><div class="card ui-panel"><div id="settings-system-status"></div></div><div class="card ui-panel"><div id="settings-forwarding-errors"></div></div><div class="card ui-panel"><div id="settings-recent-gps"></div></div>`;
   const host = page.querySelector("#settings-host");
 
   const nasInterval = createField({
@@ -636,6 +698,7 @@ function buildSettingsPage() {
     saveNowBtn,
     saveBtn,
   );
+  renderDevicesSection();
   renderSystemStatus();
   renderForwardingErrors();
   renderRecentGps();
