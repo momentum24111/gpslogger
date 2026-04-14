@@ -10,6 +10,7 @@ import {
   pushToast,
   setFieldState,
   setButtonLoading,
+  readModalAnimationDurationMs,
 } from "/static/ui-components.js";
 import { initInkRipple } from "/static/ripple.js";
 
@@ -50,7 +51,6 @@ const ui = {
   markers: new Map(),
   routeLines: [],
   mapMode: localStorage.getItem("gpslogger.map.mode") || "satellite",
-  showHistory: (localStorage.getItem("gpslogger.map.showHistory") || "true") === "true",
   autoRefreshHandle: null,
   mapRange: localStorage.getItem("gpslogger.map.range") || "24h",
   positionEventSource: null,
@@ -66,6 +66,8 @@ const ui = {
   mapSidebarListenersBound: false,
   mapSidebarDelegatedClick: false,
   mapSidebarMqBound: false,
+  settingsDirty: false,
+  settingsUnsavedDialogOpen: false,
 };
 
 const MAP_COLOR_COUNT = 6;
@@ -658,12 +660,35 @@ function initMapSidebarDrawer() {
 }
 
 function initSettingsHashRouting() {
-  const onHash = () => {
+  const onHash = (ev) => {
     if (location.hash === SETTINGS_HASH) {
       openSettingsModalUiOnly();
-    } else {
-      closeSettingsModalUiOnly();
+      return;
     }
+    if (!ui.settingsModalOpen) return;
+    let oldHash = "";
+    try {
+      if (typeof ev?.oldURL === "string" && ev.oldURL) {
+        oldHash = new URL(ev.oldURL).hash;
+      }
+    } catch {
+      oldHash = "";
+    }
+    const leftSettingsRoute = oldHash === SETTINGS_HASH || oldHash === "";
+    if (ui.settingsDirty && leftSettingsRoute) {
+      const restore =
+        typeof ev?.oldURL === "string" && ev.oldURL
+          ? ev.oldURL
+          : `${window.location.pathname}${window.location.search}${SETTINGS_HASH}`;
+      history.replaceState(null, "", restore);
+      queueMicrotask(() => {
+        if (!ui.settingsUnsavedDialogOpen) {
+          openUnsavedSettingsCloseConfirm(() => dismissSettingsRoute());
+        }
+      });
+      return;
+    }
+    closeSettingsModalUiOnly();
   };
   window.addEventListener("hashchange", onHash);
   if (location.hash === SETTINGS_HASH) {
@@ -674,15 +699,120 @@ function initSettingsHashRouting() {
 function openSettingsModalUiOnly() {
   const page = document.getElementById("page-settings");
   if (!page) return;
+  const wasActive = page.classList.contains("active");
   page.classList.add("active");
   ui.settingsModalOpen = true;
+  if (!wasActive) {
+    page.classList.remove("settings-modal--shown");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => page.classList.add("settings-modal--shown"));
+    });
+  } else if (!page.classList.contains("settings-modal--shown")) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => page.classList.add("settings-modal--shown"));
+    });
+  }
 }
 
 function closeSettingsModalUiOnly() {
   const page = document.getElementById("page-settings");
-  if (!page) return;
-  page.classList.remove("active");
-  ui.settingsModalOpen = false;
+  if (!page || !ui.settingsModalOpen) return;
+  const finish = () => {
+    page.classList.remove("active", "settings-modal--shown");
+    ui.settingsModalOpen = false;
+  };
+  if (page.classList.contains("settings-modal--shown")) {
+    page.classList.remove("settings-modal--shown");
+    window.setTimeout(finish, readModalAnimationDurationMs() + 40);
+  } else {
+    finish();
+  }
+}
+
+function dismissSettingsRoute() {
+  if (location.hash === SETTINGS_HASH) {
+    if (window.history.length > 1) {
+      history.back();
+    } else {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      closeSettingsModalUiOnly();
+    }
+  } else {
+    closeSettingsModalUiOnly();
+  }
+}
+
+async function persistMainSettingsFromUi() {
+  const refs = ui.settingsFormRefs;
+  if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect) {
+    throw new Error("Einstellungen sind nicht geladen.");
+  }
+  const { nasInterval, nasPath, themeSelect } = refs;
+  setFieldState(nasInterval, "default", "");
+  const intervalValue = Number(nasInterval.input.value || 60);
+  if (!Number.isFinite(intervalValue) || intervalValue < 5) {
+    setFieldState(nasInterval, "error", "Intervall muss mindestens 5 Sekunden sein.");
+    throw new Error("Bitte Eingaben prüfen");
+  }
+  const payload = {
+    nas_interval_seconds: intervalValue,
+    nas_path: nasPath.input.value.trim(),
+    theme: themeSelect.input.value,
+  };
+  const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+  state.settings = data.settings;
+  applyTheme(state.settings.theme);
+  setFieldState(nasInterval, "success", "");
+  pushToast(ui.toastArea, "Einstellungen gespeichert", "success");
+  ui.settingsDirty = false;
+}
+
+function openUnsavedSettingsCloseConfirm(afterResolved) {
+  if (ui.settingsUnsavedDialogOpen) return;
+  ui.settingsUnsavedDialogOpen = true;
+  const message = document.createElement("div");
+  message.textContent =
+    "Es gibt nicht gespeicherte Änderungen an NAS-Pfad, Intervall oder Theme. Speichern oder verwerfen?";
+  const discardBtn = createButton({ label: "Einstellungen verwerfen" });
+  discardBtn.classList.add("btn-secondary");
+  const saveBtn = createButton({ label: "Speichern", icon: "check" });
+  saveBtn.classList.add("btn-primary");
+  const modal = createModal({
+    title: "Ungespeicherte Änderungen",
+    content: message,
+    actions: [discardBtn, saveBtn],
+    closeOnBackdrop: false,
+    closeOnEscape: false,
+  });
+  discardBtn.addEventListener("click", async () => {
+    try {
+      await loadSettings();
+      applyTheme(state.settings.theme || "light");
+      buildSettingsPage();
+      ui.settingsDirty = false;
+      ui.settingsUnsavedDialogOpen = false;
+      modal.close();
+      afterResolved?.();
+    } catch (err) {
+      pushToast(ui.toastArea, err.message, "error");
+      ui.settingsUnsavedDialogOpen = false;
+      modal.close();
+    }
+  });
+  saveBtn.addEventListener("click", async () => {
+    setButtonLoading(saveBtn, true, "Speichert...");
+    try {
+      await persistMainSettingsFromUi();
+      ui.settingsUnsavedDialogOpen = false;
+      modal.close();
+      afterResolved?.();
+    } catch (err) {
+      pushToast(ui.toastArea, err.message, "error");
+    } finally {
+      setButtonLoading(saveBtn, false);
+    }
+  });
+  modal.open();
 }
 
 function openSettingsModal() {
@@ -696,16 +826,11 @@ function openSettingsModal() {
 
 function closeSettingsModal() {
   if (!ui.settingsModalOpen) return;
-  if (location.hash === SETTINGS_HASH) {
-    if (window.history.length > 1) {
-      history.back();
-    } else {
-      history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-      closeSettingsModalUiOnly();
-    }
+  if (ui.settingsDirty) {
+    openUnsavedSettingsCloseConfirm(() => dismissSettingsRoute());
     return;
   }
-  closeSettingsModalUiOnly();
+  dismissSettingsRoute();
 }
 
 function buildMapPage() {
@@ -805,7 +930,12 @@ function buildMapPage() {
     if (ui.mapRange === "custom") refreshMapData({ fromField, toField });
   });
 
-  ui.map = L.map("map", { zoomControl: true, scrollWheelZoom: true, touchZoom: true }).setView([51.2, 10.4], 6);
+  ui.map = L.map("map", {
+    zoomControl: true,
+    scrollWheelZoom: true,
+    touchZoom: true,
+    attributionControl: false,
+  }).setView([51.2, 10.4], 6);
   ui.map.on("click", () => closePinnedRouteTooltip());
   document.addEventListener("click", (event) => {
     const target = event.target;
@@ -814,12 +944,12 @@ function buildMapPage() {
     closePinnedRouteTooltip();
   });
   ui.layers.street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap",
+    attribution: "",
     maxZoom: 19,
   });
   ui.layers.satellite = L.tileLayer(
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    { attribution: "Tiles &copy; Esri", maxZoom: 19 },
+    { attribution: "", maxZoom: 19 },
   );
   if (ui.mapMode === "satellite") {
     ui.layers.satellite.addTo(ui.map);
@@ -828,29 +958,12 @@ function buildMapPage() {
   }
 
   const overlay = page.querySelector("#map-overlay");
-  const historySwitch = createSwitch({
-    label: "Historie",
-    value: ui.showHistory,
-    onChange: (enabled) => {
-      ui.showHistory = enabled;
-      localStorage.setItem("gpslogger.map.showHistory", String(enabled));
-      ui.routeLines.forEach((line) => {
-        if (enabled) {
-          if (!ui.map.hasLayer(line)) line.addTo(ui.map);
-        } else if (ui.map.hasLayer(line)) {
-          ui.map.removeLayer(line);
-        }
-      });
-    },
-  });
   const layerSwitch = createSwitch({
     label: "Satellit",
     value: ui.mapMode === "satellite",
     onChange: (enabled) => setMapMode(enabled ? "satellite" : "street"),
   });
-  historySwitch.wrap.classList.add("ui-map-toggle");
   layerSwitch.wrap.classList.add("ui-map-toggle");
-  overlay.appendChild(historySwitch.wrap);
   overlay.appendChild(layerSwitch.wrap);
 }
 
@@ -989,9 +1102,6 @@ function drawPositions(positions, opts = {}) {
       weight: getMapCssNumber("--map-route-line-width", 3),
       opacity: getMapCssNumber("--map-route-line-opacity", 0.9),
     }).addTo(ui.map);
-    if (!ui.showHistory) {
-      ui.map.removeLayer(line);
-    }
     ui.routeLines.push(line);
 
     const latest = items[items.length - 1];
@@ -1271,7 +1381,7 @@ function openRotateKeyModal(device) {
 
 function buildSettingsPage() {
   const page = document.getElementById("page-settings");
-  page.classList.remove("active");
+  page.classList.remove("active", "settings-modal--shown");
   page.classList.add("settings-modal");
   page.innerHTML = `
     <div class="settings-modal-backdrop" data-action="close-settings"></div>
@@ -1363,24 +1473,7 @@ function buildSettingsPage() {
     onClick: async () => {
       setButtonLoading(saveBtn, true, "Speichert...");
       try {
-        setFieldState(nasInterval, "default", "");
-
-        const intervalValue = Number(nasInterval.input.value || 60);
-        if (!Number.isFinite(intervalValue) || intervalValue < 5) {
-          setFieldState(nasInterval, "error", "Intervall muss mindestens 5 Sekunden sein.");
-          throw new Error("Bitte Eingaben prüfen");
-        }
-
-        const payload = {
-          nas_interval_seconds: intervalValue,
-          nas_path: nasPath.input.value.trim(),
-          theme: themeSelect.input.value,
-        };
-        const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
-        state.settings = data.settings;
-        applyTheme(state.settings.theme);
-        setFieldState(nasInterval, "success", "");
-        pushToast(ui.toastArea, "Einstellungen gespeichert", "success");
+        await persistMainSettingsFromUi();
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
       } finally {
@@ -1390,7 +1483,16 @@ function buildSettingsPage() {
   });
   saveBtn.classList.add("btn-primary", "btn-settings-save");
 
-  themeSelect.input.addEventListener("change", () => applyTheme(themeSelect.input.value));
+  themeSelect.input.addEventListener("change", () => {
+    applyTheme(themeSelect.input.value);
+    ui.settingsDirty = true;
+  });
+  nasInterval.input.addEventListener("input", () => {
+    ui.settingsDirty = true;
+  });
+  nasPath.input.addEventListener("input", () => {
+    ui.settingsDirty = true;
+  });
   themeHost.append(themeSelect.field);
   storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
   const addFwBtn = createButton({
@@ -1412,6 +1514,8 @@ function buildSettingsPage() {
   actionsHost?.appendChild(restartBtn);
   const saveFooter = page.querySelector("#settings-save-footer");
   saveFooter?.appendChild(saveBtn);
+  ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, saveBtn };
+  ui.settingsDirty = false;
   renderDevicesSection();
   renderSystemStatus();
   renderForwardingErrors();

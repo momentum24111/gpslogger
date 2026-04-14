@@ -10,6 +10,9 @@
   --spacing-xl: 1.25rem;
   --toast-width: 360px;
   --toast-accent-width: 4px;
+  --modal-animation-duration: 0.26s;
+  --modal-animation-easing: cubic-bezier(0.22, 1, 0.36, 1);
+  --modal-enter-scale: 0.88;
 }
 
 * {
@@ -84,9 +87,14 @@ main {
   flex-shrink: 0;
 }
 
-.map-sidebar-toggle.is-active {
-  background: var(--map-sidebar-toggle-active-bg, var(--color-primary-soft));
-  color: var(--map-sidebar-toggle-active-fg, var(--color-text));
+.icon-btn.map-sidebar-toggle.is-active {
+  background: var(--map-sidebar-toggle-active-bg, var(--color-primary));
+  color: var(--map-sidebar-toggle-active-fg, var(--color-surface-elevated));
+}
+
+.icon-btn.map-sidebar-toggle.is-active:hover {
+  background: var(--map-sidebar-toggle-active-hover-bg, var(--map-sidebar-toggle-active-bg, var(--color-primary)));
+  color: var(--map-sidebar-toggle-active-hover-fg, var(--map-sidebar-toggle-active-fg, var(--color-surface-elevated)));
 }
 
 .brand {
@@ -250,7 +258,7 @@ main {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-bottom: 0;
+  padding-bottom: 0.85rem;
 }
 
 #page-settings.page.active {
@@ -518,10 +526,21 @@ main {
 
 .map-wrap {
   position: relative;
+  z-index: 0;
+  isolation: isolate;
   flex: 1;
   min-height: 0;
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+
+.map-wrap .leaflet-control-container,
+.map-wrap .leaflet-bottom {
+  z-index: 2;
+}
+
+.map-wrap .leaflet-control-attribution {
+  display: none !important;
 }
 
 #map {
@@ -679,6 +698,14 @@ main {
   place-items: center;
   z-index: 1300;
   padding: var(--spacing-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--modal-animation-duration) var(--modal-animation-easing);
+}
+
+.modal-overlay.modal-overlay--shown {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .modal {
@@ -686,6 +713,17 @@ main {
   background: var(--modal-bg, var(--color-surface));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal, none);
+  opacity: 0;
+  transform: scale(var(--modal-enter-scale));
+  transform-origin: center center;
+  transition:
+    opacity var(--modal-animation-duration) var(--modal-animation-easing),
+    transform var(--modal-animation-duration) var(--modal-animation-easing);
+}
+
+.modal-overlay.modal-overlay--shown .modal {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .modal-head {
@@ -1112,10 +1150,22 @@ main {
   display: block;
 }
 
+.settings-modal.active:not(.settings-modal--shown) {
+  pointer-events: none;
+}
+
 .settings-modal-backdrop {
   position: absolute;
   inset: 0;
   background: var(--color-overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--modal-animation-duration) var(--modal-animation-easing);
+}
+
+.settings-modal.settings-modal--shown .settings-modal-backdrop {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .settings-modal-card {
@@ -1124,6 +1174,21 @@ main {
   margin: 1rem;
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
+  opacity: 0;
+  transform: scale(var(--modal-enter-scale));
+  transform-origin: center top;
+  transition:
+    opacity var(--modal-animation-duration) var(--modal-animation-easing),
+    transform var(--modal-animation-duration) var(--modal-animation-easing);
+}
+
+.settings-modal.settings-modal--shown .settings-modal-card {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.settings-modal.settings-modal--shown {
+  pointer-events: auto;
 }
 
 .settings-modal-head {
@@ -1153,7 +1218,7 @@ main {
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 850;
+    z-index: 1990;
     background: var(--map-drawer-backdrop-bg, var(--color-overlay));
     opacity: 0;
     pointer-events: none;
@@ -1173,7 +1238,7 @@ main {
     width: 85vw;
     min-width: 85vw;
     max-width: 100%;
-    z-index: 900;
+    z-index: 2000;
     transform: translateX(-100%);
     transition: transform 0.28s ease;
     box-shadow: var(--map-drawer-panel-shadow, none);

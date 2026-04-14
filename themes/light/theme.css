@@ -179,8 +179,10 @@
   --map-color-picker-selected-ring: var(--color-primary);
 
   --interactive-control-radius: var(--radius-sm, 6px);
-  --map-sidebar-toggle-active-bg: var(--color-primary-soft);
-  --map-sidebar-toggle-active-fg: var(--color-text);
+  --map-sidebar-toggle-active-bg: var(--color-primary);
+  --map-sidebar-toggle-active-fg: var(--primary-contrast, var(--color-surface-elevated));
+  --map-sidebar-toggle-active-hover-bg: color-mix(in srgb, var(--color-primary) 88%, var(--color-text));
+  --map-sidebar-toggle-active-hover-fg: var(--primary-contrast, var(--color-surface-elevated));
   --map-drawer-backdrop-bg: var(--color-overlay);
   --map-drawer-panel-shadow: 0 8px 28px var(--color-shadow);
 }

@@ -109,6 +109,17 @@ export function setButtonLoading(button, isLoading, loadingLabel = "Lädt...") {
   }
 }
 
+export function readModalAnimationDurationMs() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--modal-animation-duration").trim() || "240ms";
+  const v = parseFloat(raw);
+  if (!Number.isFinite(v)) return 280;
+  return /ms/i.test(raw) ? v : v * 1000;
+}
+
+function removeModalOverlay(overlay) {
+  overlay.remove();
+}
+
 export function createModal({ title, content, actions = [], closeOnEscape = true, closeOnBackdrop = true }) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -136,33 +147,54 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
   modal.append(head, body, foot);
   overlay.appendChild(modal);
   let keyListener = null;
+  let backdropListener = null;
+  let closing = false;
+
+  const armCloseListeners = (self) => {
+    if (closeOnBackdrop) {
+      backdropListener = (event) => {
+        if (event.target !== overlay || closing) return;
+        self.close();
+      };
+      overlay.addEventListener("click", backdropListener);
+    }
+    if (closeOnEscape) {
+      keyListener = (event) => {
+        if (event.key === "Escape" && !closing) {
+          self.close();
+        }
+      };
+      document.addEventListener("keydown", keyListener);
+    }
+  };
+
   return {
     overlay,
     open() {
       document.body.appendChild(overlay);
+      armCloseListeners(this);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          overlay.classList.add("modal-overlay--shown");
+        });
+      });
       const focusTarget = actions[0] ?? modal;
       setTimeout(() => focusTarget.focus?.(), 0);
-      if (closeOnBackdrop) {
-        overlay.addEventListener("click", (event) => {
-          if (event.target === overlay) {
-            this.close();
-          }
-        });
-      }
-      if (closeOnEscape) {
-        keyListener = (event) => {
-          if (event.key === "Escape") {
-            this.close();
-          }
-        };
-        document.addEventListener("keydown", keyListener);
-      }
     },
     close() {
+      if (!overlay.parentNode || closing) return;
+      closing = true;
+      if (backdropListener) {
+        overlay.removeEventListener("click", backdropListener);
+        backdropListener = null;
+      }
       if (keyListener) {
         document.removeEventListener("keydown", keyListener);
+        keyListener = null;
       }
-      overlay.remove();
+      overlay.classList.remove("modal-overlay--shown");
+      const ms = readModalAnimationDurationMs() + 40;
+      window.setTimeout(() => removeModalOverlay(overlay), ms);
     },
   };
 }
