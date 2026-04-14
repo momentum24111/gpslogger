@@ -28,10 +28,22 @@
   <body>
     <div class="app-shell">
       <header class="app-header">
-        <button id="brand-home" class="brand brand-home" type="button" aria-label="Zur Karte">
-          <span class="material-symbols-outlined">route</span>
-          <span>GPSLogger</span>
-        </button>
+        <div class="app-header-leading">
+          <button
+            id="map-sidebar-toggle"
+            class="icon-btn map-sidebar-toggle"
+            type="button"
+            aria-controls="page-map"
+            aria-expanded="false"
+            aria-label="Menü öffnen"
+          >
+            <span class="material-symbols-outlined">menu</span>
+          </button>
+          <button id="brand-home" class="brand brand-home" type="button" aria-label="Zur Karte">
+            <span class="material-symbols-outlined">route</span>
+            <span>GPSLogger</span>
+          </button>
+        </div>
       </header>
       <main>
         <section id="page-map" class="page"></section>

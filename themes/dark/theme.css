@@ -176,6 +176,12 @@
   --map-tooltip-link-fg: var(--color-primary);
   --map-tooltip-label-width: 6.5rem;
   --map-color-picker-selected-ring: var(--color-primary);
+
+  --interactive-control-radius: var(--radius-sm, 6px);
+  --map-sidebar-toggle-active-bg: var(--color-primary-soft);
+  --map-sidebar-toggle-active-fg: var(--color-text);
+  --map-drawer-backdrop-bg: var(--color-overlay);
+  --map-drawer-panel-shadow: 0 8px 28px var(--color-shadow);
 }
 
 .map-color-swatch--0 {

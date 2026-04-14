@@ -60,12 +60,19 @@ const ui = {
   pinnedRouteTooltipMarker: null,
   floatingColorPicker: null,
   settingsModalOpen: false,
+  mapLayoutEl: null,
+  mapDrawerBackdropEl: null,
+  mapSidebarToggleEl: null,
+  mapSidebarListenersBound: false,
+  mapSidebarDelegatedClick: false,
+  mapSidebarMqBound: false,
 };
 
 const MAP_COLOR_COUNT = 6;
 const MAP_RANGE_CURRENT = "current";
 const STORAGE_VISIBLE = "gpslogger.map.visibleDeviceIds";
 const STORAGE_DEVICE_SNAPSHOT = "gpslogger.map.deviceIdsSnapshot";
+const SETTINGS_HASH = "#settings";
 
 const state = {
   devices: [],
@@ -171,9 +178,14 @@ async function bootstrap() {
   applyTheme(state.settings.theme || "light");
   buildMapPage();
   buildSettingsPage();
+  initMapSidebarDrawer();
+  initSettingsHashRouting();
   connectPositionStream();
   const brandHome = document.getElementById("brand-home");
-  brandHome?.addEventListener("click", () => closeSettingsModal());
+  brandHome?.addEventListener("click", () => {
+    closeSettingsModal();
+    closeMapSidebarDrawer();
+  });
   await refreshMapData();
   startAutoRefresh();
   document.addEventListener("visibilitychange", () => {
@@ -574,10 +586,135 @@ function renderMapDeviceList() {
   });
 }
 
+function isMobileMapLayout() {
+  return window.matchMedia("(max-width: 899px)").matches;
+}
+
+function setMapSidebarDrawerOpen(open) {
+  const layout = ui.mapLayoutEl;
+  const toggle = ui.mapSidebarToggleEl;
+  if (!layout || !toggle) return;
+  layout.classList.toggle("map-layout--drawer-open", !!open);
+  toggle.classList.toggle("is-active", !!open);
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  toggle.setAttribute("aria-label", open ? "Menü schließen" : "Menü öffnen");
+  if (ui.mapDrawerBackdropEl) {
+    const showBackdrop = !!open && isMobileMapLayout();
+    ui.mapDrawerBackdropEl.classList.toggle("is-open", showBackdrop);
+    ui.mapDrawerBackdropEl.setAttribute("aria-hidden", showBackdrop ? "false" : "true");
+  }
+  if (ui.map) setTimeout(() => ui.map.invalidateSize(), 280);
+}
+
+function closeMapSidebarDrawer() {
+  setMapSidebarDrawerOpen(false);
+}
+
+function toggleMapSidebarDrawer() {
+  if (!isMobileMapLayout()) return;
+  const layout = ui.mapLayoutEl;
+  if (!layout) return;
+  setMapSidebarDrawerOpen(!layout.classList.contains("map-layout--drawer-open"));
+}
+
+function initMapSidebarDrawer() {
+  const toggle = document.getElementById("map-sidebar-toggle");
+  ui.mapSidebarToggleEl = toggle;
+  ui.mapLayoutEl = document.querySelector(".map-layout");
+  ui.mapDrawerBackdropEl = document.querySelector(".map-drawer-backdrop");
+  const pageMap = document.getElementById("page-map");
+  if (!ui.mapSidebarListenersBound) {
+    ui.mapSidebarListenersBound = true;
+    toggle?.addEventListener("click", () => toggleMapSidebarDrawer());
+  }
+  if (!ui.mapSidebarDelegatedClick && pageMap) {
+    ui.mapSidebarDelegatedClick = true;
+    pageMap.addEventListener("click", (e) => {
+      const t = e.target;
+      if (t instanceof Element && t.classList.contains("map-drawer-backdrop")) {
+        closeMapSidebarDrawer();
+      }
+    });
+  }
+  const mq = window.matchMedia("(min-width: 900px)");
+  const sync = () => {
+    ui.mapLayoutEl = document.querySelector(".map-layout");
+    ui.mapDrawerBackdropEl = document.querySelector(".map-drawer-backdrop");
+    if (mq.matches) {
+      closeMapSidebarDrawer();
+      ui.mapDrawerBackdropEl?.classList.remove("is-open");
+      ui.mapDrawerBackdropEl?.setAttribute("aria-hidden", "true");
+    } else if (ui.mapDrawerBackdropEl && !ui.mapLayoutEl?.classList.contains("map-layout--drawer-open")) {
+      ui.mapDrawerBackdropEl.classList.remove("is-open");
+      ui.mapDrawerBackdropEl.setAttribute("aria-hidden", "true");
+    }
+    if (ui.map) setTimeout(() => ui.map.invalidateSize(), 150);
+  };
+  if (!ui.mapSidebarMqBound) {
+    ui.mapSidebarMqBound = true;
+    mq.addEventListener("change", sync);
+  }
+  sync();
+}
+
+function initSettingsHashRouting() {
+  const onHash = () => {
+    if (location.hash === SETTINGS_HASH) {
+      openSettingsModalUiOnly();
+    } else {
+      closeSettingsModalUiOnly();
+    }
+  };
+  window.addEventListener("hashchange", onHash);
+  if (location.hash === SETTINGS_HASH) {
+    openSettingsModalUiOnly();
+  }
+}
+
+function openSettingsModalUiOnly() {
+  const page = document.getElementById("page-settings");
+  if (!page) return;
+  page.classList.add("active");
+  ui.settingsModalOpen = true;
+}
+
+function closeSettingsModalUiOnly() {
+  const page = document.getElementById("page-settings");
+  if (!page) return;
+  page.classList.remove("active");
+  ui.settingsModalOpen = false;
+}
+
+function openSettingsModal() {
+  closeMapSidebarDrawer();
+  if (location.hash === SETTINGS_HASH) {
+    openSettingsModalUiOnly();
+  } else {
+    location.hash = SETTINGS_HASH;
+  }
+}
+
+function closeSettingsModal() {
+  if (!ui.settingsModalOpen) return;
+  if (location.hash === SETTINGS_HASH) {
+    if (window.history.length > 1) {
+      history.back();
+    } else {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      closeSettingsModalUiOnly();
+    }
+    return;
+  }
+  closeSettingsModalUiOnly();
+}
+
 function buildMapPage() {
   const page = document.getElementById("page-map");
   page.classList.add("active");
-  page.innerHTML = `<div class="map-layout"><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
+  page.innerHTML = `<div class="map-layout"><div class="map-drawer-backdrop" aria-hidden="true"></div><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
+
+  ui.mapLayoutEl = page.querySelector(".map-layout");
+  ui.mapDrawerBackdropEl = page.querySelector(".map-drawer-backdrop");
 
   const filtersHost = page.querySelector("#map-filters");
   const deviceListHost = document.createElement("div");
@@ -1279,20 +1416,6 @@ function buildSettingsPage() {
   renderSystemStatus();
   renderForwardingErrors();
   renderRecentGps();
-}
-
-function openSettingsModal() {
-  const page = document.getElementById("page-settings");
-  if (!page) return;
-  page.classList.add("active");
-  ui.settingsModalOpen = true;
-}
-
-function closeSettingsModal() {
-  const page = document.getElementById("page-settings");
-  if (!page) return;
-  page.classList.remove("active");
-  ui.settingsModalOpen = false;
 }
 
 function openForwardingModal(existing) {

@@ -2,6 +2,7 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
+  --app-header-block-height: 3.35rem;
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
   --spacing-md: 0.75rem;
@@ -70,6 +71,22 @@ main {
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
   background: var(--bg-elevated, var(--color-surface));
+}
+
+.app-header-leading {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.map-sidebar-toggle {
+  flex-shrink: 0;
+}
+
+.map-sidebar-toggle.is-active {
+  background: var(--map-sidebar-toggle-active-bg, var(--color-primary-soft));
+  color: var(--map-sidebar-toggle-active-fg, var(--color-text));
 }
 
 .brand {
@@ -957,6 +974,7 @@ main {
   font: inherit;
   font-size: 0.8125rem;
   white-space: normal;
+  border-radius: var(--interactive-control-radius, var(--radius-sm));
 }
 
 .segmented label:hover {
@@ -1044,6 +1062,14 @@ main {
 }
 
 @media (min-width: 900px) {
+  .map-sidebar-toggle {
+    display: none;
+  }
+
+  .map-drawer-backdrop {
+    display: none !important;
+  }
+
   .map-layout {
     display: grid;
     grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
@@ -1054,11 +1080,17 @@ main {
   }
 
   .map-filters-panel {
+    position: static;
+    transform: none;
+    width: auto;
+    min-width: 0;
     overflow: auto;
     min-height: 0;
     max-height: none;
     max-width: none;
     align-self: stretch;
+    box-shadow: none;
+    z-index: auto;
   }
 
   .map-wrap {
@@ -1109,7 +1141,53 @@ main {
 
 @media (max-width: 899px) {
   .map-layout {
-    min-height: auto;
+    min-height: 0;
+    flex: 1;
+    position: relative;
+  }
+
+  .map-drawer-backdrop {
+    display: block;
+    position: fixed;
+    top: var(--app-header-block-height);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 850;
+    background: var(--map-drawer-backdrop-bg, var(--color-overlay));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+
+  .map-drawer-backdrop.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .map-filters-panel {
+    position: fixed;
+    top: var(--app-header-block-height);
+    bottom: 0;
+    left: 0;
+    width: 85vw;
+    min-width: 85vw;
+    max-width: 100%;
+    z-index: 900;
+    transform: translateX(-100%);
+    transition: transform 0.28s ease;
+    box-shadow: var(--map-drawer-panel-shadow, none);
+    margin-bottom: 0;
+    border-radius: 0 var(--interactive-control-radius, var(--radius-sm)) var(--interactive-control-radius, var(--radius-sm)) 0;
+  }
+
+  .map-layout.map-layout--drawer-open .map-filters-panel {
+    transform: translateX(0);
+  }
+
+  .map-wrap {
+    flex: 1;
+    min-height: 0;
   }
 
   .map-range-picker {
