@@ -51,7 +51,6 @@ const ui = {
   routeLines: [],
   mapMode: localStorage.getItem("gpslogger.map.mode") || "satellite",
   showHistory: (localStorage.getItem("gpslogger.map.showHistory") || "true") === "true",
-  activePage: "map",
   autoRefreshHandle: null,
   mapRange: localStorage.getItem("gpslogger.map.range") || "24h",
   positionEventSource: null,
@@ -60,6 +59,7 @@ const ui = {
   routePointMarkers: [],
   pinnedRouteTooltipMarker: null,
   floatingColorPicker: null,
+  settingsModalOpen: false,
 };
 
 const MAP_COLOR_COUNT = 6;
@@ -80,8 +80,6 @@ const state = {
 
 /** Verhindert parallele Neustart-Workflows (Button / Modal). */
 let gpsloggerRestartWorkflowActive = false;
-
-const PAGE_IDS = new Set(["map", "settings"]);
 
 function isHttpUrl(value) {
   if (!value) return false;
@@ -171,13 +169,11 @@ async function bootstrap() {
 
   await Promise.all([loadDevices(), loadDeviceStatuses(), loadSettings(), loadThemes(), loadSystemStatus(), loadForwardingErrors()]);
   applyTheme(state.settings.theme || "light");
-  buildTabs();
   buildMapPage();
   buildSettingsPage();
-  initRouting();
   connectPositionStream();
   const brandHome = document.getElementById("brand-home");
-  brandHome?.addEventListener("click", () => showPage("map"));
+  brandHome?.addEventListener("click", () => closeSettingsModal());
   await refreshMapData();
   startAutoRefresh();
   document.addEventListener("visibilitychange", () => {
@@ -191,63 +187,10 @@ async function bootstrap() {
   registerServiceWorker();
 }
 
-function normalizeHashPage() {
-  const raw = window.location.hash.replace(/^#/, "").trim();
-  return PAGE_IDS.has(raw) ? raw : "map";
-}
-
-function initRouting() {
-  showPage(normalizeHashPage(), { updateHash: true });
-  window.addEventListener("hashchange", () => {
-    showPage(normalizeHashPage(), { updateHash: false });
-  });
-}
-
-function buildTabs() {
-  const tabs = document.getElementById("tabs");
-  tabs.innerHTML = "";
-  tabs.classList.add("ui-nav");
-  [
-    { id: "map", label: "Karte", icon: "map" },
-    { id: "settings", label: "Einstellungen", icon: "settings" },
-  ].forEach((tab) => {
-    const host = document.createElement("div");
-    host.className = "tab ui-tab";
-    const btn = createButton({
-      label: tab.label,
-      icon: tab.icon,
-      onClick: () => showPage(tab.id),
-    });
-    btn.classList.add("ui-nav-btn");
-    btn.dataset.page = tab.id;
-    host.appendChild(btn);
-    tabs.appendChild(host);
-  });
-}
-
-function showPage(pageId, { updateHash = true } = {}) {
-  ui.activePage = pageId;
-  document.querySelectorAll(".page").forEach((page) => {
-    page.classList.toggle("active", page.id === `page-${pageId}`);
-  });
-  document.querySelectorAll("#tabs .btn").forEach((btn) => {
-    btn.classList.toggle("selected", btn.dataset.page === pageId);
-  });
-  if (updateHash) {
-    const target = `#${pageId}`;
-    if (window.location.hash !== target) window.location.hash = target;
-  }
-  if (pageId === "map" && ui.map) {
-    setTimeout(() => ui.map.invalidateSize(), 100);
-  }
-}
-
 async function runAutoRefreshCycle() {
   try {
-    if (ui.activePage === "map") {
-      await refreshMapData({ preserveView: true });
-    }
-    if (ui.activePage === "settings") {
+    await refreshMapData({ preserveView: true });
+    if (ui.settingsModalOpen) {
       await loadSettings();
       await loadDevices();
       await loadDeviceStatuses();
@@ -378,11 +321,10 @@ function buildPositionTooltipHtml(position, deviceNameFallback = "") {
     ["Geschw.", escapeHtml(formatMetricValue(position.speed, "km/h"))],
     ["Richtung", escapeHtml(formatMetricValue(position.direction, "°"))],
     ["Höhe", escapeHtml(formatMetricValue(position.altitude, "m"))],
-    ["Aktivität", escapeHtml(String(position.activity || "—"))],
   ];
   return `<div class="map-tooltip-content"><div class="map-tooltip-title">${escapeHtml(String(deviceName))}</div><div class="map-tooltip-grid">${rows
     .map(([label, value]) => `<span class="map-tooltip-label">${label}</span><span class="map-tooltip-value">${value}</span>`)
-    .join("")}</div><div class="map-tooltip-actions"><a class="map-tooltip-maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Google Maps öffnen</a></div></div>`;
+    .join("")}</div><div class="map-tooltip-actions"><a class="map-tooltip-maps-link btn" href="${mapsUrl}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span><span>Google Maps öffnen</span></a></div></div>`;
 }
 
 function closePinnedRouteTooltip() {
@@ -405,6 +347,9 @@ function bindRoutePointInteractions(marker) {
   marker.on("mouseout", () => {
     marker.setRadius(baseRadius);
     if (!marker.__tooltipPinned) marker.closeTooltip();
+  });
+  marker.on("tooltipclose", () => {
+    if (marker.__tooltipPinned) marker.openTooltip();
   });
   marker.on("click", (event) => {
     if (ui.pinnedRouteTooltipMarker && ui.pinnedRouteTooltipMarker !== marker) {
@@ -460,8 +405,13 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
       opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
       className: "map-live-point map-live-point--pulse",
     }).addTo(ui.map);
-    marker.bindTooltip(buildPositionTooltipHtml(livePoint, device.name), {
-      sticky: true,
+    marker.bindTooltip(escapeHtml(formatRelativeTimeDe(livePoint.timestamp)), {
+      permanent: true,
+      direction: "top",
+      offset: [0, -10],
+      className: "map-live-age-tooltip",
+    });
+    marker.bindPopup(buildPositionTooltipHtml(livePoint, device.name), {
       className: "map-point-tooltip",
     });
     ui.markers.set(device.id, marker);
@@ -525,7 +475,7 @@ function initMapDeviceListClosePicker() {
   if (ui.mapPickerCloseInitialized) return;
   ui.mapPickerCloseInitialized = true;
   document.addEventListener("click", (e) => {
-    if (e.target.closest(".map-device-color-btn") || e.target.closest(".map-color-picker")) return;
+    if (e.target.closest(".map-device-palette-btn") || e.target.closest(".map-color-picker")) return;
     closeFloatingColorPicker();
   });
 }
@@ -544,7 +494,7 @@ function connectPositionStream() {
   es.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
-      if (msg.type === "position" && ui.activePage === "map") {
+      if (msg.type === "position") {
         refreshMapData({ preserveView: true });
       }
     } catch (_e) {
@@ -583,23 +533,24 @@ function renderMapDeviceList() {
     row.setAttribute("role", "button");
 
     const colorIdx = Number(device.map_color_index) % MAP_COLOR_COUNT;
-    const colorBtn = document.createElement("button");
-    colorBtn.type = "button";
-    colorBtn.className = `map-device-color-btn map-color-swatch--${colorIdx}`;
-    colorBtn.setAttribute("aria-label", "Farbe wählen");
-    colorBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const pickerOpenForDevice = ui.floatingColorPicker?.dataset.deviceId === device.id;
-      if (pickerOpenForDevice) {
-        closeFloatingColorPicker();
-      } else {
-        openFloatingColorPicker(colorBtn, device, colorIdx);
-      }
-    });
+    const colorDot = document.createElement("span");
+    colorDot.className = `map-device-color-dot map-color-swatch--${colorIdx}`;
+    colorDot.setAttribute("aria-hidden", "true");
 
     const label = document.createElement("div");
     label.className = "map-device-row-label";
     label.textContent = device.name;
+    const paletteBtn = document.createElement("button");
+    paletteBtn.type = "button";
+    paletteBtn.className = "map-device-palette-btn";
+    paletteBtn.setAttribute("aria-label", "Farbe wählen");
+    paletteBtn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">palette</span>';
+    paletteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const pickerOpenForDevice = ui.floatingColorPicker?.dataset.deviceId === device.id;
+      if (pickerOpenForDevice) closeFloatingColorPicker();
+      else openFloatingColorPicker(paletteBtn, device, colorIdx);
+    });
 
     const onRowActivate = () => {
       toggleDeviceVisibility(device.id);
@@ -607,7 +558,7 @@ function renderMapDeviceList() {
       refreshMapData({ preserveView: true });
     };
     row.addEventListener("click", (e) => {
-      if (e.target.closest(".map-device-color-btn") || e.target.closest(".map-color-picker")) return;
+      if (e.target.closest(".map-device-palette-btn") || e.target.closest(".map-color-picker")) return;
       onRowActivate();
     });
     row.addEventListener("keydown", (e) => {
@@ -617,7 +568,7 @@ function renderMapDeviceList() {
       }
     });
 
-    row.append(colorBtn, label);
+    row.append(colorDot, label, paletteBtn);
     wrap.append(row);
     host.appendChild(wrap);
   });
@@ -625,6 +576,7 @@ function renderMapDeviceList() {
 
 function buildMapPage() {
   const page = document.getElementById("page-map");
+  page.classList.add("active");
   page.innerHTML = `<div class="map-layout"><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
 
   const filtersHost = page.querySelector("#map-filters");
@@ -642,6 +594,7 @@ function buildMapPage() {
   const rangeField = document.createElement("div");
   rangeField.className = "field";
   const rangeLabel = document.createElement("span");
+  rangeLabel.className = "field-label-text";
   rangeLabel.textContent = "Zeitraum";
   const rangePicker = document.createElement("div");
   rangePicker.className = "segmented map-range-picker";
@@ -686,6 +639,13 @@ function buildMapPage() {
   customDateWrap.append(fromField.field, toField.field);
   customDateWrap.hidden = ui.mapRange !== "custom";
   filtersHost.append(deviceListHost, rangeField, customDateWrap);
+  const settingsBtn = createButton({
+    label: "Einstellungen",
+    icon: "settings",
+    onClick: () => openSettingsModal(),
+  });
+  settingsBtn.classList.add("btn-secondary", "map-settings-btn");
+  filtersHost.appendChild(settingsBtn);
 
   initMapDeviceListClosePicker();
   renderMapDeviceList();
@@ -928,8 +888,13 @@ function drawPositions(positions, opts = {}) {
       opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
       className: "map-live-point map-live-point--pulse",
     });
-    marker.bindTooltip(buildPositionTooltipHtml(latest), {
-      sticky: true,
+    marker.bindTooltip(escapeHtml(formatRelativeTimeDe(latest.timestamp)), {
+      permanent: true,
+      direction: "top",
+      offset: [0, -10],
+      className: "map-live-age-tooltip",
+    });
+    marker.bindPopup(buildPositionTooltipHtml(latest), {
       className: "map-point-tooltip map-point-tooltip--live",
     });
     marker.addTo(ui.map);
@@ -1169,8 +1134,17 @@ function openRotateKeyModal(device) {
 
 function buildSettingsPage() {
   const page = document.getElementById("page-settings");
+  page.classList.remove("active");
+  page.classList.add("settings-modal");
   page.innerHTML = `
-    <div class="card settings-card">
+    <div class="settings-modal-backdrop" data-action="close-settings"></div>
+    <div class="card settings-card settings-modal-card">
+      <div class="settings-modal-head">
+        <h2>Einstellungen</h2>
+        <button type="button" class="icon-btn settings-modal-close" data-action="close-settings" aria-label="Einstellungen schließen">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
       <section class="settings-section">
         <h3>Theme</h3>
         <div id="settings-theme" class="ui-form-grid"></div>
@@ -1212,6 +1186,9 @@ function buildSettingsPage() {
       <div id="settings-save-footer" class="settings-save-footer"></div>
     </div>
   `;
+  page.querySelectorAll('[data-action="close-settings"]').forEach((el) => {
+    el.addEventListener("click", () => closeSettingsModal());
+  });
   const themeHost = page.querySelector("#settings-theme");
   const storageHost = page.querySelector("#settings-storage");
   const forwardingAddHost = page.querySelector("#forwarding-add-host");
@@ -1302,6 +1279,20 @@ function buildSettingsPage() {
   renderSystemStatus();
   renderForwardingErrors();
   renderRecentGps();
+}
+
+function openSettingsModal() {
+  const page = document.getElementById("page-settings");
+  if (!page) return;
+  page.classList.add("active");
+  ui.settingsModalOpen = true;
+}
+
+function closeSettingsModal() {
+  const page = document.getElementById("page-settings");
+  if (!page) return;
+  page.classList.remove("active");
+  ui.settingsModalOpen = false;
 }
 
 function openForwardingModal(existing) {

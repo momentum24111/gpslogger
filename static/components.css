@@ -50,7 +50,7 @@ textarea {
   max-height: 100dvh;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   background: var(--bg, var(--color-bg));
 }
 
@@ -90,42 +90,6 @@ main {
 
 .brand .material-symbols-outlined {
   font-size: 22px;
-}
-
-.tabs {
-  display: flex;
-  gap: var(--spacing-sm);
-  padding: 0.55rem max(0.75rem, env(safe-area-inset-right, 0px)) calc(0.55rem + env(safe-area-inset-bottom, 0px))
-    max(0.75rem, env(safe-area-inset-left, 0px));
-  background: color-mix(in srgb, var(--bg-elevated, var(--color-surface)) 90%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.tabs-bottom {
-  position: sticky;
-  bottom: 0;
-  z-index: 1000;
-}
-
-.tab {
-  flex: 1;
-  min-width: 0;
-}
-
-.tab .btn {
-  width: 100%;
-  min-height: 2.85rem;
-  flex-direction: column;
-  gap: 0.18rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  line-height: 1;
-  min-width: 0;
-}
-
-.tab .btn .material-symbols-outlined {
-  font-size: 20px;
 }
 
 .btn,
@@ -420,7 +384,7 @@ main {
 
 .map-device-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--spacing-sm);
   padding: 0.45rem 0.5rem;
@@ -447,21 +411,40 @@ main {
   opacity: 0.48;
 }
 
-.map-device-color-btn {
+.map-device-color-dot {
   width: 1.35rem;
   height: 1.35rem;
   min-width: 1.35rem;
-  padding: 0;
   border-radius: 50%;
   border: 2px solid var(--color-border);
-  cursor: pointer;
   flex-shrink: 0;
   background-clip: padding-box;
 }
 
-.map-device-color-btn:focus-visible {
+.map-device-palette-btn {
+  width: 1.9rem;
+  height: 1.9rem;
+  min-width: 1.9rem;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.map-device-palette-btn:hover {
+  background: var(--hover-bg, var(--color-hover));
+  color: var(--color-text);
+}
+
+.map-device-palette-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--control-focus, var(--color-primary)) 45%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--control-focus, var(--color-primary)) 45%, transparent);
+}
+
+.map-device-palette-btn .material-symbols-outlined {
+  font-size: 18px;
 }
 
 .map-device-row-label {
@@ -882,6 +865,22 @@ main {
   font-size: 0.75rem;
 }
 
+.map-live-age-tooltip {
+  border: none;
+  background: var(--map-live-age-bg, var(--map-tooltip-bg, var(--color-surface-elevated)));
+  color: var(--map-live-age-fg, var(--map-tooltip-fg, var(--color-text)));
+  border-radius: var(--radius-sm);
+  box-shadow: var(--map-live-age-shadow, var(--map-tooltip-shadow, none));
+}
+
+.map-live-age-tooltip .leaflet-tooltip-content {
+  margin: 0.15rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
 .map-tooltip-content {
   min-width: 12rem;
 }
@@ -899,7 +898,7 @@ main {
 
 .map-tooltip-label {
   color: var(--map-tooltip-label-fg, var(--color-text-muted));
-  text-align: right;
+  text-align: left;
 }
 
 .map-tooltip-value {
@@ -914,8 +913,16 @@ main {
 
 .map-tooltip-maps-link {
   color: var(--map-tooltip-link-fg, var(--color-primary));
-  text-decoration: none;
+  text-decoration: none !important;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2rem;
+}
+
+.map-tooltip-maps-link .material-symbols-outlined {
+  font-size: 16px;
 }
 
 .map-tooltip-maps-link:hover {
@@ -997,6 +1004,11 @@ main {
   padding: 0.2rem 0;
 }
 
+.map-settings-btn {
+  width: 100%;
+  margin-top: var(--spacing-sm);
+}
+
 @keyframes pulse-marker-dynamic {
   0% {
     box-shadow: 0 0 0 0 var(--pm-soft, var(--color-primary-soft));
@@ -1055,6 +1067,44 @@ main {
     height: 100%;
     max-height: 100%;
   }
+}
+
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 1500;
+}
+
+.settings-modal.active {
+  display: block;
+}
+
+.settings-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--color-overlay);
+}
+
+.settings-modal-card {
+  position: relative;
+  z-index: 1;
+  margin: 1rem;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.settings-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.settings-modal-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
 }
 
 @media (max-width: 899px) {

@@ -170,6 +170,9 @@
   --map-tooltip-bg: var(--color-surface-elevated);
   --map-tooltip-fg: var(--color-text);
   --map-tooltip-shadow: 0 8px 24px var(--color-shadow);
+  --map-live-age-bg: var(--map-tooltip-bg);
+  --map-live-age-fg: var(--map-tooltip-fg);
+  --map-live-age-shadow: var(--map-tooltip-shadow);
   --map-tooltip-label-fg: var(--color-text-muted);
   --map-tooltip-link-fg: var(--color-primary);
   --map-tooltip-label-width: 6.5rem;
