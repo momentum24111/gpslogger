@@ -11,6 +11,9 @@ from .utils import ensure_dir, read_json, secure_api_key, stable_device_id, utc_
 
 DEVICE_DRAFT_TTL_SEC = 900
 
+# Index 0..N-1 verweist auf Theme-Variablen --device-map-palette-{i} (Farben nur in theme.css).
+DEVICE_MAP_COLOR_COUNT = 6
+
 DEFAULT_SETTINGS = {
     "nas_interval_seconds": 60,
     "nas_path": "nas_storage",
@@ -53,6 +56,7 @@ class AppState:
         self._device_drafts: dict[str, tuple[float, str]] = {}
 
         self._migrate_settings_forwardings()
+        self._migrate_devices_map_color()
         self._persist_devices()
         self._persist_settings()
         self._persist_pending()
@@ -69,6 +73,28 @@ class AppState:
 
     def _persist_statuses(self) -> None:
         write_json(self.status_path, self.device_statuses)
+
+    def _migrate_devices_map_color(self) -> None:
+        """Für bestehende Geräte ohne map_color_index: stabiler Default aus Listenposition."""
+        changed = False
+        for i, device in enumerate(self.devices):
+            if not isinstance(device, dict):
+                continue
+            if device.get("map_color_index") is None:
+                device["map_color_index"] = i % DEVICE_MAP_COLOR_COUNT
+                changed = True
+        if changed:
+            self._persist_devices()
+
+    @staticmethod
+    def normalize_map_color_index(raw: Any) -> int:
+        try:
+            idx = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError("map_color_index muss eine ganze Zahl sein")
+        if idx < 0 or idx >= DEVICE_MAP_COLOR_COUNT:
+            raise ValueError(f"map_color_index muss zwischen 0 und {DEVICE_MAP_COLOR_COUNT - 1} liegen")
+        return idx
 
     def _migrate_settings_forwardings(self) -> None:
         """Legacy: eine globale Weiterleitung → Liste forwardings[]."""
@@ -209,6 +235,7 @@ class AppState:
                     "name": device.get("name"),
                     "created_at": device.get("created_at"),
                     "api_key": device.get("api_key"),
+                    "map_color_index": int(device.get("map_color_index", 0)) % DEVICE_MAP_COLOR_COUNT,
                 }
                 for device in self.devices
             ]
@@ -256,18 +283,25 @@ class AppState:
                 "name": cleaned_name,
                 "api_key": final_key,
                 "created_at": utc_now_iso(),
+                "map_color_index": len(self.devices) % DEVICE_MAP_COLOR_COUNT,
             }
             self.devices.append(device)
             del self._device_drafts[str(draft_token).strip()]
             self._persist_devices()
             return dict(device)
 
-    def update_device(self, device_id: str, name: str) -> dict[str, Any] | None:
+    def update_device(
+        self, device_id: str, name: str, *, map_color_index: int | None = None
+    ) -> dict[str, Any] | None:
         with self._lock:
             cleaned_name = self._validate_device_name(name, exclude_id=device_id)
             for device in self.devices:
                 if device["id"] == device_id:
                     device["name"] = cleaned_name
+                    if map_color_index is not None:
+                        device["map_color_index"] = map_color_index % DEVICE_MAP_COLOR_COUNT
+                    elif device.get("map_color_index") is None:
+                        device["map_color_index"] = 0
                     self._persist_devices()
                     return dict(device)
             return None

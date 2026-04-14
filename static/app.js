@@ -54,7 +54,17 @@ const ui = {
   activePage: "map",
   autoRefreshHandle: null,
   mapRange: localStorage.getItem("gpslogger.map.range") || "24h",
+  positionEventSource: null,
+  sseReconnectTimer: null,
+  mapPickerCloseInitialized: false,
+  routePointMarkers: [],
+  pinnedRouteTooltipMarker: null,
 };
+
+const MAP_COLOR_COUNT = 6;
+const MAP_RANGE_CURRENT = "current";
+const STORAGE_VISIBLE = "gpslogger.map.visibleDeviceIds";
+const STORAGE_DEVICE_SNAPSHOT = "gpslogger.map.deviceIdsSnapshot";
 
 const state = {
   devices: [],
@@ -64,7 +74,7 @@ const state = {
   forwardingErrors: [],
   recentGps: [],
   themes: [],
-  selectedDeviceId: localStorage.getItem("gpslogger.selectedDeviceId") || "",
+  visibleDeviceIds: new Set(),
 };
 
 /** Verhindert parallele Neustart-Workflows (Button / Modal). */
@@ -164,6 +174,7 @@ async function bootstrap() {
   buildMapPage();
   buildSettingsPage();
   initRouting();
+  connectPositionStream();
   const brandHome = document.getElementById("brand-home");
   brandHome?.addEventListener("click", () => showPage("map"));
   await refreshMapData();
@@ -176,6 +187,7 @@ async function bootstrap() {
       startAutoRefresh();
     }
   });
+  registerServiceWorker();
 }
 
 function normalizeHashPage() {
@@ -232,7 +244,7 @@ function showPage(pageId, { updateHash = true } = {}) {
 async function runAutoRefreshCycle() {
   try {
     if (ui.activePage === "map") {
-      await refreshMapData();
+      await refreshMapData({ preserveView: true });
     }
     if (ui.activePage === "settings") {
       await loadSettings();
@@ -264,16 +276,310 @@ function stopAutoRefresh() {
   }
 }
 
-function syncMapDeviceSelectOptions(selectElement) {
-  if (!selectElement) return;
-  const previous = state.selectedDeviceId;
-  selectElement.innerHTML = `<option value="">Alle Geräte</option>${state.devices
-    .map((d) => `<option value="${d.id}">${d.name}</option>`)
-    .join("")}`;
-  const stillExists = state.devices.some((d) => d.id === previous);
-  state.selectedDeviceId = stillExists ? previous : "";
-  selectElement.value = state.selectedDeviceId;
-  localStorage.setItem("gpslogger.selectedDeviceId", state.selectedDeviceId);
+function migrateMapDeviceSelection() {
+  if (localStorage.getItem(STORAGE_VISIBLE) !== null) return;
+  const single = localStorage.getItem("gpslogger.selectedDeviceId") || "";
+  if (single) {
+    localStorage.setItem(STORAGE_VISIBLE, JSON.stringify([single]));
+  }
+  localStorage.removeItem("gpslogger.selectedDeviceId");
+}
+
+function syncVisibleDevicesWithLoadedDevices() {
+  const currentIds = new Set(state.devices.map((d) => d.id));
+  let prevSnap = new Set();
+  try {
+    const snapRaw = localStorage.getItem(STORAGE_DEVICE_SNAPSHOT);
+    if (snapRaw) prevSnap = new Set(JSON.parse(snapRaw));
+  } catch {
+    prevSnap = new Set();
+  }
+  const raw = localStorage.getItem(STORAGE_VISIBLE);
+  let filtered;
+  if (raw === null) {
+    filtered = [...currentIds];
+  } else {
+    try {
+      filtered = JSON.parse(raw);
+      if (!Array.isArray(filtered)) filtered = [];
+    } catch {
+      filtered = [];
+    }
+    filtered = filtered.filter((id) => currentIds.has(id));
+    currentIds.forEach((id) => {
+      if (!prevSnap.has(id) && !filtered.includes(id)) filtered.push(id);
+    });
+  }
+  localStorage.setItem(STORAGE_DEVICE_SNAPSHOT, JSON.stringify([...currentIds]));
+  state.visibleDeviceIds = new Set(filtered);
+  localStorage.setItem(STORAGE_VISIBLE, JSON.stringify(filtered));
+}
+
+function saveVisibleDeviceIds() {
+  localStorage.setItem(STORAGE_VISIBLE, JSON.stringify([...state.visibleDeviceIds]));
+}
+
+function toggleDeviceVisibility(deviceId) {
+  if (state.visibleDeviceIds.has(deviceId)) state.visibleDeviceIds.delete(deviceId);
+  else state.visibleDeviceIds.add(deviceId);
+  saveVisibleDeviceIds();
+}
+
+function getDeviceColorIndex(deviceId) {
+  const d = state.devices.find((x) => x.id === deviceId);
+  const idx = d?.map_color_index;
+  return typeof idx === "number" && idx >= 0 && idx < MAP_COLOR_COUNT ? idx : 0;
+}
+
+function resolvePaletteColor(index) {
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(`--device-map-palette-${index}`).trim();
+  return resolved || getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim();
+}
+
+function getMapCssVar(name, fallback = "") {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function getMapCssNumber(name, fallback) {
+  const raw = getMapCssVar(name, "");
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildPositionTooltipHtml(position, deviceNameFallback = "") {
+  const lines = [];
+  const deviceName = position.device_name || deviceNameFallback || position.device_id || "Unbekannt";
+  lines.push(`<strong>${escapeHtml(String(deviceName))}</strong>`);
+  lines.push(escapeHtml(String(position.timestamp || "—")));
+  lines.push(`Lat: ${escapeHtml(String(position.latitude))}`);
+  lines.push(`Lon: ${escapeHtml(String(position.longitude))}`);
+  if (position.accuracy != null && position.accuracy !== "") {
+    lines.push(`Genauigkeit: ${escapeHtml(String(position.accuracy))} m`);
+  }
+  if (position.device != null && position.device !== "") {
+    lines.push(`Gerät (Client): ${escapeHtml(String(position.device))}`);
+  }
+  if (position.battery != null && position.battery !== "") {
+    lines.push(`Akku: ${escapeHtml(String(position.battery))}`);
+  }
+  if (position.speed != null) lines.push(`Geschw.: ${escapeHtml(String(position.speed))}`);
+  if (position.direction != null) lines.push(`Richtung: ${escapeHtml(String(position.direction))}°`);
+  if (position.altitude != null) lines.push(`Höhe: ${escapeHtml(String(position.altitude))}`);
+  if (position.provider) lines.push(`Provider: ${escapeHtml(String(position.provider))}`);
+  if (position.activity) lines.push(`Aktivität: ${escapeHtml(String(position.activity))}`);
+  if (position.ingest_route) lines.push(`Route: ${escapeHtml(String(position.ingest_route))}`);
+  return lines.join("<br>");
+}
+
+function closePinnedRouteTooltip() {
+  if (!ui.pinnedRouteTooltipMarker) return;
+  ui.pinnedRouteTooltipMarker.__tooltipPinned = false;
+  ui.pinnedRouteTooltipMarker.closeTooltip();
+  ui.pinnedRouteTooltipMarker = null;
+}
+
+function bindRoutePointInteractions(marker) {
+  const baseRadius = getMapCssNumber("--map-route-point-radius", 3);
+  const hoverRadius = getMapCssNumber("--map-route-point-hover-radius", 8);
+  marker.__tooltipPinned = false;
+  marker.on("mouseover", () => {
+    marker.setRadius(hoverRadius);
+    marker.openTooltip();
+  });
+  marker.on("mouseout", () => {
+    marker.setRadius(baseRadius);
+    if (!marker.__tooltipPinned) marker.closeTooltip();
+  });
+  marker.on("click", (event) => {
+    if (ui.pinnedRouteTooltipMarker && ui.pinnedRouteTooltipMarker !== marker) {
+      ui.pinnedRouteTooltipMarker.__tooltipPinned = false;
+      ui.pinnedRouteTooltipMarker.closeTooltip();
+    }
+    marker.__tooltipPinned = true;
+    ui.pinnedRouteTooltipMarker = marker;
+    marker.setRadius(hoverRadius);
+    marker.openTooltip();
+    if (event?.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
+  });
+}
+
+function clearMapOverlays() {
+  ui.markers.forEach((marker) => ui.map.removeLayer(marker));
+  ui.markers.clear();
+  ui.routeLines.forEach((line) => ui.map.removeLayer(line));
+  ui.routeLines = [];
+  ui.routePointMarkers.forEach((marker) => ui.map.removeLayer(marker));
+  ui.routePointMarkers = [];
+  closePinnedRouteTooltip();
+}
+
+async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
+  clearMapOverlays();
+  await loadDeviceStatuses();
+  const allLatLng = [];
+  state.devices.forEach((device) => {
+    if (!state.visibleDeviceIds.has(device.id)) return;
+    const st = state.deviceStatuses[device.id];
+    if (!st || st.latitude == null || st.longitude == null) return;
+    const colorIdx = getDeviceColorIndex(device.id);
+    const fill = resolvePaletteColor(colorIdx);
+    const livePoint = {
+      ...st,
+      device_id: device.id,
+      device_name: device.name,
+      latitude: Number(st.latitude),
+      longitude: Number(st.longitude),
+      timestamp: st.last_seen || "",
+    };
+    const marker = L.circleMarker([livePoint.latitude, livePoint.longitude], {
+      radius: getMapCssNumber("--map-live-point-radius", 7),
+      fillColor: fill,
+      color: getMapCssVar("--map-live-point-border"),
+      weight: getMapCssNumber("--map-live-point-border-width", 2),
+      fillOpacity: getMapCssNumber("--map-live-point-fill-opacity", 1),
+      opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
+      className: "map-live-point map-live-point--pulse",
+    }).addTo(ui.map);
+    marker.bindTooltip(buildPositionTooltipHtml(livePoint, device.name), {
+      sticky: true,
+      className: "map-point-tooltip",
+    });
+    ui.markers.set(device.id, marker);
+    allLatLng.push([livePoint.latitude, livePoint.longitude]);
+  });
+  if (!preserveView && allLatLng.length) {
+    const bounds = L.latLngBounds(allLatLng);
+    if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
+  }
+}
+
+function initMapDeviceListClosePicker() {
+  if (ui.mapPickerCloseInitialized) return;
+  ui.mapPickerCloseInitialized = true;
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".map-device-color-btn") || e.target.closest(".map-color-picker")) return;
+    document.querySelectorAll(".map-color-picker.is-open").forEach((el) => el.classList.remove("is-open"));
+  });
+}
+
+function connectPositionStream() {
+  if (ui.positionEventSource) {
+    ui.positionEventSource.close();
+    ui.positionEventSource = null;
+  }
+  if (ui.sseReconnectTimer) {
+    clearTimeout(ui.sseReconnectTimer);
+    ui.sseReconnectTimer = null;
+  }
+  const es = new EventSource("/api/stream/positions");
+  ui.positionEventSource = es;
+  es.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "position" && ui.activePage === "map") {
+        refreshMapData({ preserveView: true });
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    ui.positionEventSource = null;
+    ui.sseReconnectTimer = setTimeout(() => {
+      connectPositionStream();
+    }, 4000);
+  };
+}
+
+function renderMapDeviceList() {
+  const host = document.getElementById("map-device-list");
+  if (!host) return;
+  host.innerHTML = "";
+  if (state.devices.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "map-device-list-empty";
+    empty.textContent = "Keine Geräte angelegt.";
+    host.appendChild(empty);
+    return;
+  }
+  state.devices.forEach((device) => {
+    const wrap = document.createElement("div");
+    wrap.className = "map-device-row-wrap";
+    const visible = state.visibleDeviceIds.has(device.id);
+    wrap.classList.toggle("map-device-row-wrap--off", !visible);
+
+    const row = document.createElement("div");
+    row.className = "map-device-row";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+
+    const colorIdx = Number(device.map_color_index) % MAP_COLOR_COUNT;
+    const colorBtn = document.createElement("button");
+    colorBtn.type = "button";
+    colorBtn.className = `map-device-color-btn map-color-swatch--${colorIdx}`;
+    colorBtn.setAttribute("aria-label", "Farbe wählen");
+    colorBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const picker = wrap.querySelector(".map-color-picker");
+      const wasOpen = picker?.classList.contains("is-open");
+      document.querySelectorAll(".map-color-picker.is-open").forEach((el) => el.classList.remove("is-open"));
+      if (!wasOpen) picker?.classList.add("is-open");
+    });
+
+    const label = document.createElement("div");
+    label.className = "map-device-row-label";
+    label.textContent = device.name;
+
+    const picker = document.createElement("div");
+    picker.className = "map-color-picker";
+    for (let i = 0; i < MAP_COLOR_COUNT; i++) {
+      const sw = document.createElement("button");
+      sw.type = "button";
+      sw.className = `map-color-swatch map-color-swatch--${i}`;
+      sw.setAttribute("aria-label", `Farbe ${i + 1}`);
+      sw.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        picker.classList.remove("is-open");
+        if (i === colorIdx) return;
+        try {
+          const res = await api(`/api/devices/${device.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ name: device.name, map_color_index: i }),
+          });
+          const updated = res.device;
+          const ix = state.devices.findIndex((d) => d.id === updated.id);
+          if (ix >= 0) state.devices[ix] = updated;
+          renderMapDeviceList();
+          await refreshMapData({ preserveView: true });
+        } catch (err) {
+          pushToast(ui.toastArea, err.message, "error");
+        }
+      });
+      picker.appendChild(sw);
+    }
+
+    const onRowActivate = () => {
+      toggleDeviceVisibility(device.id);
+      renderMapDeviceList();
+      refreshMapData({ preserveView: true });
+    };
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".map-device-color-btn") || e.target.closest(".map-color-picker")) return;
+      onRowActivate();
+    });
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onRowActivate();
+      }
+    });
+
+    row.append(colorBtn, label);
+    wrap.append(row, picker);
+    host.appendChild(wrap);
+  });
 }
 
 function buildMapPage() {
@@ -281,8 +587,17 @@ function buildMapPage() {
   page.innerHTML = `<div class="map-layout"><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div><div id="map-actions" class="ui-actions-row"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
 
   const filtersHost = page.querySelector("#map-filters");
-  const deviceField = createField({ label: "Gerät", type: "select" });
-  deviceField.input.id = "map-device";
+  const deviceListHost = document.createElement("div");
+  deviceListHost.className = "map-device-list-host field";
+  const deviceListLabel = document.createElement("span");
+  deviceListLabel.className = "field-label-text";
+  deviceListLabel.textContent = "Geräte";
+  const deviceList = document.createElement("div");
+  deviceList.id = "map-device-list";
+  deviceList.className = "map-device-list";
+  deviceList.setAttribute("role", "group");
+  deviceList.setAttribute("aria-label", "Geräte ein- und ausblenden");
+  deviceListHost.append(deviceListLabel, deviceList);
   const rangeField = document.createElement("div");
   rangeField.className = "field";
   const rangeLabel = document.createElement("span");
@@ -290,6 +605,7 @@ function buildMapPage() {
   const rangePicker = document.createElement("div");
   rangePicker.className = "segmented map-range-picker";
   const ranges = [
+    { value: MAP_RANGE_CURRENT, label: "Aktuelle Position" },
     { value: "1h", label: "Letzte Stunde" },
     { value: "6h", label: "Letzte 6 Stunden" },
     { value: "24h", label: "Letzte 24 Stunden" },
@@ -328,7 +644,7 @@ function buildMapPage() {
   toField.input.value = localStorage.getItem("gpslogger.map.toDate") || "";
   customDateWrap.append(fromField.field, toField.field);
   customDateWrap.hidden = ui.mapRange !== "custom";
-  filtersHost.append(deviceField.field, rangeField, customDateWrap);
+  filtersHost.append(deviceListHost, rangeField, customDateWrap);
 
   const actionHost = page.querySelector("#map-actions");
   const reloadBtn = createButton({
@@ -341,13 +657,8 @@ function buildMapPage() {
     reloadBtn,
   );
 
-  const mapDevice = deviceField.input;
-  syncMapDeviceSelectOptions(mapDevice);
-  mapDevice.addEventListener("change", () => {
-    state.selectedDeviceId = mapDevice.value;
-    localStorage.setItem("gpslogger.selectedDeviceId", state.selectedDeviceId);
-    refreshMapData({ fromField, toField, reloadBtn });
-  });
+  initMapDeviceListClosePicker();
+  renderMapDeviceList();
   fromField.input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && ui.mapRange === "custom") {
       refreshMapData({ fromField, toField, reloadBtn });
@@ -368,6 +679,13 @@ function buildMapPage() {
   });
 
   ui.map = L.map("map", { zoomControl: true, scrollWheelZoom: true, touchZoom: true }).setView([51.2, 10.4], 6);
+  ui.map.on("click", () => closePinnedRouteTooltip());
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest(".leaflet-interactive.map-route-point") || target.closest(".leaflet-tooltip")) return;
+    closePinnedRouteTooltip();
+  });
   ui.layers.street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
     maxZoom: 19,
@@ -418,6 +736,21 @@ function setMapMode(mode) {
 }
 
 async function refreshMapData(opts = {}) {
+  if (ui.mapRange === MAP_RANGE_CURRENT) {
+    if (opts.reloadBtn) {
+      setButtonLoading(opts.reloadBtn, true, "Lädt...");
+    }
+    try {
+      await drawCurrentPositionsOnly({ preserveView: !!opts.preserveView });
+    } catch (err) {
+      pushToast(ui.toastArea, err.message, "error");
+    } finally {
+      if (opts.reloadBtn) {
+        setButtonLoading(opts.reloadBtn, false);
+      }
+    }
+    return;
+  }
   const fromInput = document.getElementById("map-from");
   const toInput = document.getElementById("map-to");
   const { from, to, error } = resolveRangeQuery(
@@ -442,7 +775,6 @@ async function refreshMapData(opts = {}) {
     setButtonLoading(opts.reloadBtn, true, "Lädt...");
   }
   const query = new URLSearchParams();
-  if (state.selectedDeviceId) query.set("device_id", state.selectedDeviceId);
   if (from) query.set("from", from);
   if (to) query.set("to", to);
   try {
@@ -450,7 +782,7 @@ async function refreshMapData(opts = {}) {
     const positions = data.positions || [];
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
-    drawPositions(positions);
+    drawPositions(positions, { preserveView: !!opts.preserveView });
   } catch (err) {
     pushToast(ui.toastArea, err.message, "error");
   } finally {
@@ -488,56 +820,76 @@ function resolveRangeQuery(range, customFrom, customTo) {
   return { from: fromDate.toISOString(), to: now.toISOString(), error: "" };
 }
 
-function drawPositions(positions) {
-  ui.markers.forEach((marker) => ui.map.removeLayer(marker));
-  ui.markers.clear();
-  ui.routeLines.forEach((line) => ui.map.removeLayer(line));
-  ui.routeLines = [];
-  if (!positions.length) return;
+function drawPositions(positions, opts = {}) {
+  const preserveView = !!opts.preserveView;
+  clearMapOverlays();
+  const visible = state.visibleDeviceIds;
+  const filtered = positions.filter((p) => p.device_id && visible.has(p.device_id));
+  if (!filtered.length) return;
 
   const byDevice = new Map();
-  positions.forEach((p) => {
+  filtered.forEach((p) => {
     if (!byDevice.has(p.device_id)) byDevice.set(p.device_id, []);
     byDevice.get(p.device_id).push(p);
   });
 
   const allLatLng = [];
-  byDevice.forEach((items) => {
+  byDevice.forEach((items, deviceId) => {
     items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     const route = items.map((item) => [item.latitude, item.longitude]);
     allLatLng.push(...route);
-    const line = L.polyline(route, { color: "var(--color-primary)" }).addTo(ui.map);
+    const colorIdx = getDeviceColorIndex(deviceId);
+    const stroke = resolvePaletteColor(colorIdx);
+    const line = L.polyline(route, {
+      color: stroke,
+      weight: getMapCssNumber("--map-route-line-width", 3),
+      opacity: getMapCssNumber("--map-route-line-opacity", 0.9),
+    }).addTo(ui.map);
     if (!ui.showHistory) {
       ui.map.removeLayer(line);
     }
     ui.routeLines.push(line);
-    const latest = items[items.length - 1];
-    const rel = escapeHtml(formatRelativeTimeDe(latest.timestamp));
-    const icon = L.divIcon({
-      className: "leaflet-pulse-marker-icon",
-      html: `<div class="pulse-marker-wrap"><span class="pulse-marker-tooltip">${rel}</span><div class="pulse-marker" aria-hidden="true"></div></div>`,
-      iconSize: [144, 48],
-      iconAnchor: [72, 48],
+
+    items.forEach((point) => {
+      const routePoint = L.circleMarker([point.latitude, point.longitude], {
+        radius: getMapCssNumber("--map-route-point-radius", 3),
+        fillColor: getMapCssVar("--map-route-point-fill"),
+        color: getMapCssVar("--map-route-point-stroke"),
+        weight: getMapCssNumber("--map-route-point-stroke-width", 1),
+        fillOpacity: getMapCssNumber("--map-route-point-fill-opacity", 1),
+        opacity: getMapCssNumber("--map-route-point-stroke-opacity", 1),
+        className: "map-route-point",
+      }).addTo(ui.map);
+      routePoint.bindTooltip(buildPositionTooltipHtml(point), {
+        sticky: true,
+        className: "map-point-tooltip",
+      });
+      bindRoutePointInteractions(routePoint);
+      ui.routePointMarkers.push(routePoint);
     });
-    const marker = L.marker([latest.latitude, latest.longitude], { icon }).addTo(ui.map);
-    const popupLines = [escapeHtml(latest.device_name), escapeHtml(latest.timestamp)];
-    if (latest.accuracy != null && latest.accuracy !== "")
-      popupLines.push(`Genauigkeit: ${escapeHtml(String(latest.accuracy))} m`);
-    if (latest.device != null && latest.device !== "")
-      popupLines.push(`Gerät (Client): ${escapeHtml(latest.device)}`);
-    if (latest.battery != null && latest.battery !== "")
-      popupLines.push(`Akku: ${escapeHtml(String(latest.battery))}`);
-    if (latest.speed != null) popupLines.push(`Geschw.: ${escapeHtml(String(latest.speed))}`);
-    if (latest.direction != null) popupLines.push(`Richtung: ${escapeHtml(String(latest.direction))}°`);
-    if (latest.altitude != null) popupLines.push(`Höhe: ${escapeHtml(String(latest.altitude))}`);
-    if (latest.provider) popupLines.push(`Provider: ${escapeHtml(latest.provider)}`);
-    if (latest.activity) popupLines.push(`Aktivität: ${escapeHtml(latest.activity)}`);
-    marker.bindPopup(popupLines.join("<br>"));
+
+    const latest = items[items.length - 1];
+    const marker = L.circleMarker([latest.latitude, latest.longitude], {
+      radius: getMapCssNumber("--map-live-point-radius", 7),
+      fillColor: stroke,
+      color: getMapCssVar("--map-live-point-border"),
+      weight: getMapCssNumber("--map-live-point-border-width", 2),
+      fillOpacity: getMapCssNumber("--map-live-point-fill-opacity", 1),
+      opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
+      className: "map-live-point",
+    });
+    marker.bindTooltip(buildPositionTooltipHtml(latest), {
+      sticky: true,
+      className: "map-point-tooltip map-point-tooltip--live",
+    });
+    marker.addTo(ui.map);
     ui.markers.set(latest.device_id, marker);
   });
 
-  const bounds = L.latLngBounds(allLatLng);
-  if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
+  if (!preserveView) {
+    const bounds = L.latLngBounds(allLatLng);
+    if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
+  }
 }
 
 function renderDevicesSection() {
@@ -600,7 +952,7 @@ async function openAddDeviceModal() {
       await loadDevices();
       await loadDeviceStatuses();
       renderDeviceList();
-      syncMapDeviceSelectOptions(document.getElementById("map-device"));
+      renderMapDeviceList();
       pushToast(ui.toastArea, "Gerät angelegt", "success");
       modal.close();
     } catch (err) {
@@ -715,6 +1067,7 @@ function openRenameModal(device) {
         await loadDevices();
         await loadDeviceStatuses();
         renderDeviceList();
+        renderMapDeviceList();
         pushToast(ui.toastArea, "Gerät aktualisiert", "success");
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
@@ -735,6 +1088,8 @@ function openDeleteModal(device) {
         await loadDevices();
         await loadDeviceStatuses();
         renderDeviceList();
+        renderMapDeviceList();
+        await refreshMapData({ preserveView: true });
         pushToast(ui.toastArea, "Gerät gelöscht", "success");
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
@@ -1245,6 +1600,17 @@ function renderRecentGps() {
   });
 }
 
+function syncMetaThemeColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    return;
+  }
+  const v = getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim();
+  if (v) {
+    meta.setAttribute("content", v);
+  }
+}
+
 function applyTheme(name) {
   let link = document.getElementById("theme-link");
   if (!link) {
@@ -1253,14 +1619,27 @@ function applyTheme(name) {
     link.rel = "stylesheet";
     document.head.appendChild(link);
   }
+  link.onload = () => {
+    syncMetaThemeColor();
+  };
   link.href = `/themes/${name}/theme.css`;
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) {
+    return;
+  }
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => {
+    console.warn("[gpslogger] Service Worker Registrierung fehlgeschlagen", err);
+  });
 }
 
 async function loadDevices() {
   const data = await api("/api/devices");
   state.devices = data.devices || [];
-  const mapSelect = document.getElementById("map-device");
-  syncMapDeviceSelectOptions(mapSelect);
+  migrateMapDeviceSelection();
+  syncVisibleDevicesWithLoadedDevices();
+  renderMapDeviceList();
 }
 
 async function loadDeviceStatuses() {

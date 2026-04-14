@@ -19,6 +19,8 @@ THEMES_DIR = ROOT / "themes"
 state = AppState(ROOT)
 forward_queue: queue.Queue[dict] = queue.Queue(maxsize=5000)
 save_lock = threading.Lock()
+sse_lock = threading.Lock()
+sse_subscribers: list[queue.Queue] = []
 STARTED_AT = time.time()
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -46,6 +48,40 @@ def _fire_restart_webhook() -> None:
 
 def schedule_restart_via_webhook() -> None:
     threading.Thread(target=_fire_restart_webhook, daemon=True).start()
+
+
+def _sse_register() -> queue.Queue:
+    q: queue.Queue[bytes] = queue.Queue(maxsize=64)
+    with sse_lock:
+        sse_subscribers.append(q)
+    return q
+
+
+def _sse_unregister(q: queue.Queue) -> None:
+    with sse_lock:
+        try:
+            sse_subscribers.remove(q)
+        except ValueError:
+            pass
+
+
+def broadcast_position_event(payload: dict) -> None:
+    """Sendet ein SSE-Event an alle verbundenen Karten-Clients (JSON in data:)."""
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    line = b"data: " + raw + b"\n\n"
+    with sse_lock:
+        for q in list(sse_subscribers):
+            try:
+                q.put_nowait(line)
+            except queue.Full:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    q.put_nowait(line)
+                except queue.Full:
+                    pass
 
 
 def json_response(handler: BaseHTTPRequestHandler, payload: dict, status=HTTPStatus.OK):
@@ -252,6 +288,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    def _sse_positions_stream(self):
+        q = _sse_register()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            self.wfile.write(b"retry: 3000\n\n")
+            self.wfile.flush()
+            while True:
+                try:
+                    chunk = q.get(timeout=25.0)
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except queue.Empty:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            _sse_unregister(q)
+
     def _read_urlencoded_body(self, max_length: int = 1024 * 1024):
         content_type = self.headers.get("Content-Type", "")
         length = int(self.headers.get("Content-Length", "0"))
@@ -316,6 +376,9 @@ class Handler(BaseHTTPRequestHandler):
             record["time"] = optional_form_str(fields, "time")
 
         state.store_gps_request(record)
+        pos_row = state._position_row_from_stored(record)
+        if pos_row:
+            broadcast_position_event({"type": "position", "position": pos_row})
         try:
             forward_queue.put_nowait(record)
         except queue.Full:
@@ -351,6 +414,11 @@ class Handler(BaseHTTPRequestHandler):
             ".css": "text/css; charset=utf-8",
             ".js": "text/javascript; charset=utf-8",
             ".json": "application/json; charset=utf-8",
+            ".webmanifest": "application/manifest+json; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".ico": "image/x-icon",
+            ".webp": "image/webp",
         }.get(suffix, "application/octet-stream")
         data = path.read_bytes()
         self.send_response(HTTPStatus.OK)
@@ -395,6 +463,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 20
             return json_response(self, {"requests": state.get_recent_gps_requests(limit=limit)})
+        if route == "/api/stream/positions":
+            return self._sse_positions_stream()
         if route == "/api/themes":
             return json_response(self, {"themes": discover_themes()})
         if route == "/api/positions":
@@ -417,6 +487,20 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/themes/"):
             rel = route.removeprefix("/themes/")
             return self._serve_file(THEMES_DIR / rel)
+        if route == "/sw.js":
+            path = STATIC_DIR / "sw.js"
+            if not path.exists() or not path.is_file():
+                return self.send_error(HTTPStatus.NOT_FOUND)
+            data = path.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache, max-age=0")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if route in ("/favicon.ico", "/favicon.svg"):
+            return self._serve_file(STATIC_DIR / "favicon.svg")
         if route in ("/", "/index.html"):
             return self._serve_file(STATIC_DIR / "index.html")
         if route.startswith("/static/"):
@@ -551,8 +635,14 @@ class Handler(BaseHTTPRequestHandler):
             name = str(body.get("name", "")).strip()
             if not name:
                 return json_response(self, {"error": "Name ist erforderlich"}, HTTPStatus.BAD_REQUEST)
+            map_color_index = None
+            if "map_color_index" in body and body.get("map_color_index") is not None:
+                try:
+                    map_color_index = state.normalize_map_color_index(body.get("map_color_index"))
+                except ValueError as exc:
+                    return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             try:
-                device = state.update_device(device_id, name)
+                device = state.update_device(device_id, name, map_color_index=map_color_index)
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             if not device:

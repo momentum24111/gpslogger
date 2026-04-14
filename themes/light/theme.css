@@ -136,4 +136,56 @@
   --shadow-modal: none;
 
   --modal-bg: var(--color-surface-elevated);
+
+  /* Karten-Gerätefarben (Index serverseitig in Gerätedaten, 0–5) */
+  --device-map-palette-0: #d62828;
+  --device-map-palette-0-soft: color-mix(in srgb, var(--device-map-palette-0) 38%, transparent);
+  --device-map-palette-1: #f77f00;
+  --device-map-palette-1-soft: color-mix(in srgb, var(--device-map-palette-1) 38%, transparent);
+  --device-map-palette-2: #2a9d8f;
+  --device-map-palette-2-soft: color-mix(in srgb, var(--device-map-palette-2) 38%, transparent);
+  --device-map-palette-3: #264653;
+  --device-map-palette-3-soft: color-mix(in srgb, var(--device-map-palette-3) 38%, transparent);
+  --device-map-palette-4: #7b2cbf;
+  --device-map-palette-4-soft: color-mix(in srgb, var(--device-map-palette-4) 38%, transparent);
+  --device-map-palette-5: #4361ee;
+  --device-map-palette-5-soft: color-mix(in srgb, var(--device-map-palette-5) 38%, transparent);
+
+  --map-route-line-width: 3;
+  --map-route-line-opacity: 0.9;
+  --map-route-point-radius: 3;
+  --map-route-point-hover-radius: 7;
+  --map-route-point-fill: #ffffff;
+  --map-route-point-stroke: #ffffff;
+  --map-route-point-fill-opacity: 1;
+  --map-route-point-stroke-opacity: 0.95;
+  --map-route-point-stroke-width: 1;
+  --map-live-point-radius: 7;
+  --map-live-point-border: #ffffff;
+  --map-live-point-border-width: 2;
+  --map-live-point-fill-opacity: 1;
+  --map-live-point-stroke-opacity: 1;
+  --map-live-point-pulse-shadow: rgba(36, 86, 245, 0.42);
+  --map-tooltip-bg: var(--color-surface-elevated);
+  --map-tooltip-fg: var(--color-text);
+  --map-tooltip-shadow: 0 8px 24px var(--color-shadow);
+}
+
+.map-color-swatch--0 {
+  background: var(--device-map-palette-0);
+}
+.map-color-swatch--1 {
+  background: var(--device-map-palette-1);
+}
+.map-color-swatch--2 {
+  background: var(--device-map-palette-2);
+}
+.map-color-swatch--3 {
+  background: var(--device-map-palette-3);
+}
+.map-color-swatch--4 {
+  background: var(--device-map-palette-4);
+}
+.map-color-swatch--5 {
+  background: var(--device-map-palette-5);
 }

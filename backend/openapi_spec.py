@@ -28,7 +28,10 @@ def build_openapi_spec() -> dict:
                     "Werkbank-kompatibel unter `/api/current-location`; Legacy `/api/gps`."
                 ),
             },
-            {"name": "Daten", "description": "Gespeicherte Positionen und Diagnose-Metadaten"},
+            {
+                "name": "Daten",
+                "description": "Gespeicherte Positionen, Live-Stream (SSE) und Diagnose-Metadaten",
+            },
         ],
         "paths": {
             "/api/health": {
@@ -232,7 +235,15 @@ def build_openapi_spec() -> dict:
                                 "schema": {
                                     "type": "object",
                                     "required": ["name"],
-                                    "properties": {"name": {"type": "string"}},
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "map_color_index": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 5,
+                                            "description": "Farbe auf der Karte (Theme-Palette, persistent)",
+                                        },
+                                    },
                                 }
                             }
                         },
@@ -599,6 +610,25 @@ def build_openapi_spec() -> dict:
                         },
                         "400": {"$ref": "#/components/responses/BadRequestJson"},
                         "401": {"$ref": "#/components/responses/UnauthorizedJson"},
+                    },
+                }
+            },
+            "/api/stream/positions": {
+                "get": {
+                    "tags": ["Daten"],
+                    "summary": "Server-Sent Events: neue Positionen",
+                    "description": (
+                        "Öffnet einen `text/event-stream`-Kanal. Nach jeder gespeicherten Position "
+                        "wird ein `data:`-Frame mit JSON gesendet: `{\"type\":\"position\",\"position\":{...}}` "
+                        "(`position` wie Einträge in `/api/positions`). "
+                        "Kommentarzeichen (`:`) dienen als Verbindungs-Keepalive."
+                    ),
+                    "operationId": "streamPositions",
+                    "responses": {
+                        "200": {
+                            "description": "SSE-Datenstrom (unbegrenzt bis Client trennt)",
+                            "content": {"text/event-stream": {"schema": {"type": "string", "format": "binary"}}},
+                        }
                     },
                 }
             },
