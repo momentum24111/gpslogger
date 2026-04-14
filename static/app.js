@@ -59,6 +59,7 @@ const ui = {
   mapPickerCloseInitialized: false,
   routePointMarkers: [],
   pinnedRouteTooltipMarker: null,
+  floatingColorPicker: null,
 };
 
 const MAP_COLOR_COUNT = 6;
@@ -347,34 +348,48 @@ function getMapCssNumber(name, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function formatMetricValue(value, unit = "") {
+  if (value == null || value === "") return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return `${escapeHtml(String(value))}${unit ? ` ${unit}` : ""}`;
+  return `${Math.round(n)}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatBatteryValue(value) {
+  if (value == null || value === "") return "—";
+  const n = Number(value);
+  if (Number.isFinite(n)) return `${Math.round(n)} %`;
+  return escapeHtml(String(value));
+}
+
 function buildPositionTooltipHtml(position, deviceNameFallback = "") {
-  const lines = [];
   const deviceName = position.device_name || deviceNameFallback || position.device_id || "Unbekannt";
-  lines.push(`<strong>${escapeHtml(String(deviceName))}</strong>`);
-  lines.push(escapeHtml(String(position.timestamp || "—")));
-  lines.push(`Lat: ${escapeHtml(String(position.latitude))}`);
-  lines.push(`Lon: ${escapeHtml(String(position.longitude))}`);
-  if (position.accuracy != null && position.accuracy !== "") {
-    lines.push(`Genauigkeit: ${escapeHtml(String(position.accuracy))} m`);
-  }
-  if (position.device != null && position.device !== "") {
-    lines.push(`Gerät (Client): ${escapeHtml(String(position.device))}`);
-  }
-  if (position.battery != null && position.battery !== "") {
-    lines.push(`Akku: ${escapeHtml(String(position.battery))}`);
-  }
-  if (position.speed != null) lines.push(`Geschw.: ${escapeHtml(String(position.speed))}`);
-  if (position.direction != null) lines.push(`Richtung: ${escapeHtml(String(position.direction))}°`);
-  if (position.altitude != null) lines.push(`Höhe: ${escapeHtml(String(position.altitude))}`);
-  if (position.provider) lines.push(`Provider: ${escapeHtml(String(position.provider))}`);
-  if (position.activity) lines.push(`Aktivität: ${escapeHtml(String(position.activity))}`);
-  if (position.ingest_route) lines.push(`Route: ${escapeHtml(String(position.ingest_route))}`);
-  return lines.join("<br>");
+  const lat = Number(position.latitude);
+  const lon = Number(position.longitude);
+  const latText = Number.isFinite(lat) ? lat.toFixed(6) : "—";
+  const lonText = Number.isFinite(lon) ? lon.toFixed(6) : "—";
+  const mapsUrl = `https://www.google.com/maps?q=${encodeURIComponent(`${latText},${lonText}`)}`;
+  const rows = [
+    ["Zeit", escapeHtml(String(position.timestamp || "—"))],
+    ["Lat", escapeHtml(latText)],
+    ["Lon", escapeHtml(lonText)],
+    ["Genauigkeit", escapeHtml(formatMetricValue(position.accuracy, "m"))],
+    ["Akku", escapeHtml(formatBatteryValue(position.battery))],
+    ["Geschw.", escapeHtml(formatMetricValue(position.speed, "km/h"))],
+    ["Richtung", escapeHtml(formatMetricValue(position.direction, "°"))],
+    ["Höhe", escapeHtml(formatMetricValue(position.altitude, "m"))],
+    ["Aktivität", escapeHtml(String(position.activity || "—"))],
+  ];
+  return `<div class="map-tooltip-content"><div class="map-tooltip-title">${escapeHtml(String(deviceName))}</div><div class="map-tooltip-grid">${rows
+    .map(([label, value]) => `<span class="map-tooltip-label">${label}</span><span class="map-tooltip-value">${value}</span>`)
+    .join("")}</div><div class="map-tooltip-actions"><a class="map-tooltip-maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Google Maps öffnen</a></div></div>`;
 }
 
 function closePinnedRouteTooltip() {
   if (!ui.pinnedRouteTooltipMarker) return;
   ui.pinnedRouteTooltipMarker.__tooltipPinned = false;
+  const pinnedTooltip = ui.pinnedRouteTooltipMarker.getTooltip?.();
+  if (pinnedTooltip) pinnedTooltip.options.permanent = false;
   ui.pinnedRouteTooltipMarker.closeTooltip();
   ui.pinnedRouteTooltipMarker = null;
 }
@@ -394,10 +409,14 @@ function bindRoutePointInteractions(marker) {
   marker.on("click", (event) => {
     if (ui.pinnedRouteTooltipMarker && ui.pinnedRouteTooltipMarker !== marker) {
       ui.pinnedRouteTooltipMarker.__tooltipPinned = false;
+      const currentPinnedTooltip = ui.pinnedRouteTooltipMarker.getTooltip?.();
+      if (currentPinnedTooltip) currentPinnedTooltip.options.permanent = false;
       ui.pinnedRouteTooltipMarker.closeTooltip();
     }
     marker.__tooltipPinned = true;
     ui.pinnedRouteTooltipMarker = marker;
+    const tooltip = marker.getTooltip?.();
+    if (tooltip) tooltip.options.permanent = true;
     marker.setRadius(hoverRadius);
     marker.openTooltip();
     if (event?.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
@@ -454,12 +473,60 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
   }
 }
 
+function closeFloatingColorPicker() {
+  if (ui.floatingColorPicker) {
+    ui.floatingColorPicker.remove();
+    ui.floatingColorPicker = null;
+  }
+}
+
+function openFloatingColorPicker(anchorButton, device, currentColorIdx) {
+  closeFloatingColorPicker();
+  const picker = document.createElement("div");
+  picker.className = "map-color-picker map-color-picker-floating is-open";
+  picker.dataset.deviceId = device.id;
+  for (let i = 0; i < MAP_COLOR_COUNT; i++) {
+    const sw = document.createElement("button");
+    sw.type = "button";
+    sw.className = `map-color-swatch map-color-swatch--${i}`;
+    sw.setAttribute("aria-label", `Farbe ${i + 1}`);
+    if (i === currentColorIdx) sw.classList.add("is-selected");
+    sw.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      closeFloatingColorPicker();
+      if (i === currentColorIdx) return;
+      try {
+        const res = await api(`/api/devices/${device.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: device.name, map_color_index: i }),
+        });
+        const updated = res.device;
+        const ix = state.devices.findIndex((d) => d.id === updated.id);
+        if (ix >= 0) state.devices[ix] = updated;
+        renderMapDeviceList();
+        await refreshMapData({ preserveView: true });
+      } catch (err) {
+        pushToast(ui.toastArea, err.message, "error");
+      }
+    });
+    picker.appendChild(sw);
+  }
+  document.body.appendChild(picker);
+  const rect = anchorButton.getBoundingClientRect();
+  const pickerRect = picker.getBoundingClientRect();
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - pickerRect.width - 8);
+  const top = Math.min(Math.max(8, rect.bottom + 6), window.innerHeight - pickerRect.height - 8);
+  picker.style.left = `${left}px`;
+  picker.style.top = `${top}px`;
+  ui.floatingColorPicker = picker;
+}
+
 function initMapDeviceListClosePicker() {
   if (ui.mapPickerCloseInitialized) return;
   ui.mapPickerCloseInitialized = true;
   document.addEventListener("click", (e) => {
     if (e.target.closest(".map-device-color-btn") || e.target.closest(".map-color-picker")) return;
-    document.querySelectorAll(".map-color-picker.is-open").forEach((el) => el.classList.remove("is-open"));
+    closeFloatingColorPicker();
   });
 }
 
@@ -522,43 +589,17 @@ function renderMapDeviceList() {
     colorBtn.setAttribute("aria-label", "Farbe wählen");
     colorBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const picker = wrap.querySelector(".map-color-picker");
-      const wasOpen = picker?.classList.contains("is-open");
-      document.querySelectorAll(".map-color-picker.is-open").forEach((el) => el.classList.remove("is-open"));
-      if (!wasOpen) picker?.classList.add("is-open");
+      const pickerOpenForDevice = ui.floatingColorPicker?.dataset.deviceId === device.id;
+      if (pickerOpenForDevice) {
+        closeFloatingColorPicker();
+      } else {
+        openFloatingColorPicker(colorBtn, device, colorIdx);
+      }
     });
 
     const label = document.createElement("div");
     label.className = "map-device-row-label";
     label.textContent = device.name;
-
-    const picker = document.createElement("div");
-    picker.className = "map-color-picker";
-    for (let i = 0; i < MAP_COLOR_COUNT; i++) {
-      const sw = document.createElement("button");
-      sw.type = "button";
-      sw.className = `map-color-swatch map-color-swatch--${i}`;
-      sw.setAttribute("aria-label", `Farbe ${i + 1}`);
-      sw.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        picker.classList.remove("is-open");
-        if (i === colorIdx) return;
-        try {
-          const res = await api(`/api/devices/${device.id}`, {
-            method: "PUT",
-            body: JSON.stringify({ name: device.name, map_color_index: i }),
-          });
-          const updated = res.device;
-          const ix = state.devices.findIndex((d) => d.id === updated.id);
-          if (ix >= 0) state.devices[ix] = updated;
-          renderMapDeviceList();
-          await refreshMapData({ preserveView: true });
-        } catch (err) {
-          pushToast(ui.toastArea, err.message, "error");
-        }
-      });
-      picker.appendChild(sw);
-    }
 
     const onRowActivate = () => {
       toggleDeviceVisibility(device.id);
@@ -577,14 +618,14 @@ function renderMapDeviceList() {
     });
 
     row.append(colorBtn, label);
-    wrap.append(row, picker);
+    wrap.append(row);
     host.appendChild(wrap);
   });
 }
 
 function buildMapPage() {
   const page = document.getElementById("page-map");
-  page.innerHTML = `<div class="map-layout"><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div><div id="map-actions" class="ui-actions-row"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
+  page.innerHTML = `<div class="map-layout"><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
 
   const filtersHost = page.querySelector("#map-filters");
   const deviceListHost = document.createElement("div");
@@ -629,7 +670,7 @@ function buildMapPage() {
       ui.mapRange = entry.value;
       localStorage.setItem("gpslogger.map.range", ui.mapRange);
       customDateWrap.hidden = ui.mapRange !== "custom";
-      refreshMapData({ reloadBtn, fromField, toField });
+      refreshMapData({ fromField, toField });
     });
     rangePicker.append(input, label);
   });
@@ -646,36 +687,25 @@ function buildMapPage() {
   customDateWrap.hidden = ui.mapRange !== "custom";
   filtersHost.append(deviceListHost, rangeField, customDateWrap);
 
-  const actionHost = page.querySelector("#map-actions");
-  const reloadBtn = createButton({
-    label: "Route laden",
-    icon: "refresh",
-    onClick: () => refreshMapData({ fromField, toField, reloadBtn }),
-  });
-  reloadBtn.classList.add("btn-primary", "ui-primary-action");
-  actionHost.appendChild(
-    reloadBtn,
-  );
-
   initMapDeviceListClosePicker();
   renderMapDeviceList();
   fromField.input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && ui.mapRange === "custom") {
-      refreshMapData({ fromField, toField, reloadBtn });
+      refreshMapData({ fromField, toField });
     }
   });
   toField.input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && ui.mapRange === "custom") {
-      refreshMapData({ fromField, toField, reloadBtn });
+      refreshMapData({ fromField, toField });
     }
   });
   fromField.input.addEventListener("change", () => {
     localStorage.setItem("gpslogger.map.fromDate", fromField.input.value || "");
-    if (ui.mapRange === "custom") refreshMapData({ fromField, toField, reloadBtn });
+    if (ui.mapRange === "custom") refreshMapData({ fromField, toField });
   });
   toField.input.addEventListener("change", () => {
     localStorage.setItem("gpslogger.map.toDate", toField.input.value || "");
-    if (ui.mapRange === "custom") refreshMapData({ fromField, toField, reloadBtn });
+    if (ui.mapRange === "custom") refreshMapData({ fromField, toField });
   });
 
   ui.map = L.map("map", { zoomControl: true, scrollWheelZoom: true, touchZoom: true }).setView([51.2, 10.4], 6);
@@ -820,6 +850,22 @@ function resolveRangeQuery(range, customFrom, customTo) {
   return { from: fromDate.toISOString(), to: now.toISOString(), error: "" };
 }
 
+function isCustomRangeInPast() {
+  if (ui.mapRange !== "custom") return false;
+  const toInput = document.getElementById("map-to");
+  const toValue = toInput?.value || "";
+  if (!toValue) return false;
+  const toDateEnd = new Date(`${toValue}T23:59:59.999`);
+  if (Number.isNaN(toDateEnd.getTime())) return false;
+  return toDateEnd.getTime() < Date.now();
+}
+
+function isCurrentPoint(deviceId, latestTs) {
+  const status = state.deviceStatuses[deviceId];
+  if (!status?.last_seen || !latestTs) return false;
+  return String(status.last_seen) === String(latestTs);
+}
+
 function drawPositions(positions, opts = {}) {
   const preserveView = !!opts.preserveView;
   clearMapOverlays();
@@ -834,6 +880,7 @@ function drawPositions(positions, opts = {}) {
   });
 
   const allLatLng = [];
+  const customPast = isCustomRangeInPast();
   byDevice.forEach((items, deviceId) => {
     items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     const route = items.map((item) => [item.latitude, item.longitude]);
@@ -850,7 +897,10 @@ function drawPositions(positions, opts = {}) {
     }
     ui.routeLines.push(line);
 
-    items.forEach((point) => {
+    const latest = items[items.length - 1];
+    const shouldTreatLatestAsLive = !customPast && isCurrentPoint(deviceId, latest?.timestamp);
+    const pointsToRender = shouldTreatLatestAsLive ? items.slice(0, -1) : items;
+    pointsToRender.forEach((point) => {
       const routePoint = L.circleMarker([point.latitude, point.longitude], {
         radius: getMapCssNumber("--map-route-point-radius", 3),
         fillColor: getMapCssVar("--map-route-point-fill"),
@@ -868,7 +918,7 @@ function drawPositions(positions, opts = {}) {
       ui.routePointMarkers.push(routePoint);
     });
 
-    const latest = items[items.length - 1];
+    if (!shouldTreatLatestAsLive) return;
     const marker = L.circleMarker([latest.latitude, latest.longitude], {
       radius: getMapCssNumber("--map-live-point-radius", 7),
       fillColor: stroke,
@@ -876,7 +926,7 @@ function drawPositions(positions, opts = {}) {
       weight: getMapCssNumber("--map-live-point-border-width", 2),
       fillOpacity: getMapCssNumber("--map-live-point-fill-opacity", 1),
       opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
-      className: "map-live-point",
+      className: "map-live-point map-live-point--pulse",
     });
     marker.bindTooltip(buildPositionTooltipHtml(latest), {
       sticky: true,

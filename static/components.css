@@ -92,6 +92,11 @@ main {
   font-size: 22px;
 }
 
+.brand-icon-img {
+  width: 22px;
+  height: 22px;
+}
+
 .tabs {
   display: flex;
   gap: var(--spacing-sm);
@@ -295,7 +300,6 @@ main {
 }
 
 #map-filters,
-#map-actions,
 #devices-create,
 #settings-theme,
 #settings-storage,
@@ -307,12 +311,6 @@ main {
 .settings-forwarding-block {
   display: grid;
   gap: var(--spacing-md);
-}
-
-#map-actions .btn {
-  width: 100%;
-  min-width: 0;
-  margin-top: var(--spacing-sm);
 }
 
 .field {
@@ -481,9 +479,9 @@ main {
 }
 
 .map-color-picker {
-  position: absolute;
-  left: 0.35rem;
-  top: calc(100% + 4px);
+  position: fixed;
+  left: 0;
+  top: 0;
   z-index: 20;
   display: none;
   flex-direction: row;
@@ -500,6 +498,10 @@ main {
   display: flex;
 }
 
+.map-color-picker-floating {
+  z-index: 1400;
+}
+
 .map-color-swatch {
   width: 1.1rem;
   height: 1.1rem;
@@ -508,6 +510,10 @@ main {
   border-radius: 50%;
   border: 2px solid var(--color-border);
   cursor: pointer;
+}
+
+.map-color-swatch.is-selected {
+  box-shadow: 0 0 0 2px var(--map-color-picker-selected-ring, var(--color-primary));
 }
 
 .map-color-swatch:focus-visible {
@@ -881,8 +887,48 @@ main {
   font-size: 0.75rem;
 }
 
+.map-tooltip-content {
+  min-width: 12rem;
+}
+
+.map-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.map-tooltip-grid {
+  display: grid;
+  grid-template-columns: var(--map-tooltip-label-width, 6.5rem) minmax(0, 1fr);
+  gap: 0.1rem 0.5rem;
+}
+
+.map-tooltip-label {
+  color: var(--map-tooltip-label-fg, var(--color-text-muted));
+  text-align: right;
+}
+
+.map-tooltip-value {
+  text-align: left;
+}
+
+.map-tooltip-actions {
+  margin-top: 0.45rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.map-tooltip-maps-link {
+  color: var(--map-tooltip-link-fg, var(--color-primary));
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.map-tooltip-maps-link:hover {
+  text-decoration: underline;
+}
+
 .map-live-point--pulse {
-  animation: map-live-point-pulse 2s infinite;
+  animation: map-live-point-pulse 1.9s ease-out infinite;
 }
 
 .segmented {
@@ -970,13 +1016,16 @@ main {
 
 @keyframes map-live-point-pulse {
   0% {
-    filter: drop-shadow(0 0 0 var(--map-live-point-pulse-shadow, transparent));
+    stroke-opacity: 1;
+    stroke-width: var(--map-live-point-border-width, 2);
   }
-  70% {
-    filter: drop-shadow(0 0 10px var(--map-live-point-pulse-shadow, transparent));
+  50% {
+    stroke-opacity: 0.7;
+    stroke-width: var(--map-live-point-pulse-border-width, 4);
   }
   100% {
-    filter: drop-shadow(0 0 0 var(--map-live-point-pulse-shadow, transparent));
+    stroke-opacity: 1;
+    stroke-width: var(--map-live-point-border-width, 2);
   }
 }
 

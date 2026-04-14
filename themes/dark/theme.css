@@ -165,9 +165,14 @@
   --map-live-point-fill-opacity: 1;
   --map-live-point-stroke-opacity: 1;
   --map-live-point-pulse-shadow: rgba(126, 161, 255, 0.5);
+  --map-live-point-pulse-border-width: 4;
   --map-tooltip-bg: var(--color-surface);
   --map-tooltip-fg: var(--color-text);
   --map-tooltip-shadow: 0 8px 24px var(--color-shadow);
+  --map-tooltip-label-fg: var(--color-text-muted);
+  --map-tooltip-link-fg: var(--color-primary);
+  --map-tooltip-label-width: 6.5rem;
+  --map-color-picker-selected-ring: var(--color-primary);
 }
 
 .map-color-swatch--0 {
