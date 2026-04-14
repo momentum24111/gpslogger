@@ -92,11 +92,6 @@ main {
   font-size: 22px;
 }
 
-.brand-icon-img {
-  width: 22px;
-  height: 22px;
-}
-
 .tabs {
   display: flex;
   gap: var(--spacing-sm);
