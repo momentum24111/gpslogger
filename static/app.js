@@ -66,8 +66,10 @@ const ui = {
   mapSidebarListenersBound: false,
   mapSidebarDelegatedClick: false,
   mapSidebarMqBound: false,
+  mapSidebarDesktopMode: null,
   settingsDirty: false,
   settingsUnsavedDialogOpen: false,
+  settingsEscKeyListener: null,
 };
 
 const MAP_COLOR_COUNT = 6;
@@ -613,7 +615,6 @@ function closeMapSidebarDrawer() {
 }
 
 function toggleMapSidebarDrawer() {
-  if (!isMobileMapLayout()) return;
   const layout = ui.mapLayoutEl;
   if (!layout) return;
   setMapSidebarDrawerOpen(!layout.classList.contains("map-layout--drawer-open"));
@@ -642,8 +643,13 @@ function initMapSidebarDrawer() {
   const sync = () => {
     ui.mapLayoutEl = document.querySelector(".map-layout");
     ui.mapDrawerBackdropEl = document.querySelector(".map-drawer-backdrop");
-    if (mq.matches) {
-      closeMapSidebarDrawer();
+    const isDesktop = mq.matches;
+    const changedViewportMode = ui.mapSidebarDesktopMode === null || ui.mapSidebarDesktopMode !== isDesktop;
+    ui.mapSidebarDesktopMode = isDesktop;
+    if (changedViewportMode) {
+      setMapSidebarDrawerOpen(isDesktop);
+    }
+    if (isDesktop) {
       ui.mapDrawerBackdropEl?.classList.remove("is-open");
       ui.mapDrawerBackdropEl?.setAttribute("aria-hidden", "true");
     } else if (ui.mapDrawerBackdropEl && !ui.mapLayoutEl?.classList.contains("map-layout--drawer-open")) {
@@ -702,6 +708,14 @@ function openSettingsModalUiOnly() {
   const wasActive = page.classList.contains("active");
   page.classList.add("active");
   ui.settingsModalOpen = true;
+  if (!ui.settingsEscKeyListener) {
+    ui.settingsEscKeyListener = (event) => {
+      if (event.key !== "Escape" || !ui.settingsModalOpen || ui.settingsUnsavedDialogOpen) return;
+      event.preventDefault();
+      closeSettingsModal();
+    };
+    document.addEventListener("keydown", ui.settingsEscKeyListener);
+  }
   if (!wasActive) {
     page.classList.remove("settings-modal--shown");
     requestAnimationFrame(() => {
@@ -720,6 +734,10 @@ function closeSettingsModalUiOnly() {
   const finish = () => {
     page.classList.remove("active", "settings-modal--shown");
     ui.settingsModalOpen = false;
+    if (ui.settingsEscKeyListener) {
+      document.removeEventListener("keydown", ui.settingsEscKeyListener);
+      ui.settingsEscKeyListener = null;
+    }
   };
   if (page.classList.contains("settings-modal--shown")) {
     page.classList.remove("settings-modal--shown");
@@ -843,7 +861,7 @@ function buildMapPage() {
 
   const filtersHost = page.querySelector("#map-filters");
   const deviceListHost = document.createElement("div");
-  deviceListHost.className = "map-device-list-host field";
+  deviceListHost.className = "field";
   const deviceListLabel = document.createElement("span");
   deviceListLabel.className = "field-label-text";
   deviceListLabel.textContent = "Geräte";
@@ -900,14 +918,16 @@ function buildMapPage() {
   toField.input.value = localStorage.getItem("gpslogger.map.toDate") || "";
   customDateWrap.append(fromField.field, toField.field);
   customDateWrap.hidden = ui.mapRange !== "custom";
-  filtersHost.append(deviceListHost, rangeField, customDateWrap);
+  const footer = document.createElement("div");
+  footer.className = "map-filters-footer";
   const settingsBtn = createButton({
     label: "Einstellungen",
     icon: "settings",
     onClick: () => openSettingsModal(),
   });
   settingsBtn.classList.add("btn-secondary", "map-settings-btn");
-  filtersHost.appendChild(settingsBtn);
+  footer.appendChild(settingsBtn);
+  filtersHost.append(deviceListHost, rangeField, customDateWrap, footer);
 
   initMapDeviceListClosePicker();
   renderMapDeviceList();

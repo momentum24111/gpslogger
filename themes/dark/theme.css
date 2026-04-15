@@ -165,7 +165,7 @@
   --map-live-point-fill-opacity: 1;
   --map-live-point-stroke-opacity: 1;
   --map-live-point-pulse-shadow: rgba(126, 161, 255, 0.5);
-  --map-live-point-pulse-border-width: 4;
+  --map-live-point-pulse-border-width: 8;
   --map-tooltip-bg: var(--color-surface);
   --map-tooltip-fg: var(--color-text);
   --map-tooltip-shadow: 0 8px 24px var(--color-shadow);
