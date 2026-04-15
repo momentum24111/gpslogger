@@ -1657,6 +1657,8 @@ async function openStatusModal() {
     title: "Status",
     content,
     actions: [closeBtn],
+    routeHash: "#status",
+    clearExistingHashOnOpen: true,
   });
   const baseClose = modal.close.bind(modal);
   modal.close = () => {

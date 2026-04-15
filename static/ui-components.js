@@ -120,7 +120,15 @@ function removeModalOverlay(overlay) {
   overlay.remove();
 }
 
-export function createModal({ title, content, actions = [], closeOnEscape = true, closeOnBackdrop = true }) {
+export function createModal({
+  title,
+  content,
+  actions = [],
+  closeOnEscape = true,
+  closeOnBackdrop = true,
+  routeHash = "",
+  clearExistingHashOnOpen = false,
+}) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   const modal = document.createElement("div");
@@ -149,7 +157,29 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
   let keyListener = null;
   let backdropListener = null;
   let backdropPointerDown = null;
+  let hashListener = null;
+  let routeManaged = false;
   let closing = false;
+
+  const removeCurrentHash = () => {
+    history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  };
+
+  const setupRouteHash = (self) => {
+    if (!routeHash) return;
+    if (clearExistingHashOnOpen && window.location.hash && window.location.hash !== routeHash) {
+      removeCurrentHash();
+    }
+    if (window.location.hash !== routeHash) {
+      window.location.hash = routeHash;
+    }
+    routeManaged = true;
+    hashListener = () => {
+      if (window.location.hash === routeHash || closing) return;
+      self.close({ skipRouteCleanup: true });
+    };
+    window.addEventListener("hashchange", hashListener);
+  };
 
   const armCloseListeners = (self) => {
     if (closeOnBackdrop) {
@@ -179,6 +209,7 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
     overlay,
     open() {
       document.body.appendChild(overlay);
+      setupRouteHash(this);
       armCloseListeners(this);
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -188,9 +219,13 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
       const focusTarget = actions[0] ?? modal;
       setTimeout(() => focusTarget.focus?.(), 0);
     },
-    close() {
+    close({ skipRouteCleanup = false } = {}) {
       if (!overlay.parentNode || closing) return;
       closing = true;
+      if (hashListener) {
+        window.removeEventListener("hashchange", hashListener);
+        hashListener = null;
+      }
       if (backdropListener) {
         overlay.removeEventListener("click", backdropListener);
         backdropListener = null;
@@ -202,6 +237,15 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
       if (keyListener) {
         document.removeEventListener("keydown", keyListener);
         keyListener = null;
+      }
+      if (!skipRouteCleanup && routeManaged && routeHash) {
+        if (window.location.hash === routeHash) {
+          if (window.history.length > 1) {
+            history.back();
+          } else {
+            removeCurrentHash();
+          }
+        }
       }
       overlay.classList.remove("modal-overlay--shown");
       const ms = readModalAnimationDurationMs() + 40;

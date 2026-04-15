@@ -743,9 +743,13 @@ main {
 
 .modal {
   width: min(520px, 100%);
+  max-height: calc(100dvh - 2rem);
   background: var(--modal-bg, var(--color-surface));
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal, none);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   opacity: 0;
   transform: scale(var(--modal-enter-scale));
   transform-origin: center center;
@@ -761,6 +765,10 @@ main {
 
 .modal-head {
   padding: var(--spacing-lg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--modal-bg, var(--color-surface));
 }
 
 .modal-head h3 {
@@ -769,6 +777,9 @@ main {
 
 .modal-body {
   padding: var(--spacing-lg);
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
 }
 
 .modal-actions {
