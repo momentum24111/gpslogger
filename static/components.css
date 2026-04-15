@@ -606,6 +606,17 @@ main {
   justify-content: initial;
 }
 
+.list-item-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.list-item-leading-icon .material-symbols-outlined {
+  font-size: 20px;
+  color: var(--color-text-muted);
+}
+
 .list-item-body {
   min-width: 0;
 }
@@ -1080,6 +1091,10 @@ main {
 .ui-item-actions .icon-btn {
   width: 2.1rem;
   height: 2.1rem;
+}
+
+.settings-inline-switch {
+  margin-right: 0.1rem;
 }
 
 .ui-map-toggle {

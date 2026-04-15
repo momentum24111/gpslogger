@@ -1346,7 +1346,10 @@ function renderDeviceList() {
   list.innerHTML = "";
   state.devices.forEach((device) => {
     const item = document.createElement("div");
-    item.className = "list-item";
+    item.className = "list-item list-item-managed";
+    const leading = document.createElement("div");
+    leading.className = "list-item-leading list-item-leading-icon";
+    leading.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">sensors</span>';
     const info = document.createElement("div");
     const status = state.deviceStatuses[device.id];
     const seen = status?.last_seen ? new Date(status.last_seen).toLocaleString("de-DE") : "Nie";
@@ -1396,7 +1399,7 @@ function renderDeviceList() {
     deleteBtn.setAttribute("aria-label", `Gerät ${device.name} löschen`);
     deleteBtn.classList.add("btn-danger");
     actions.append(copyKeyBtn, editBtn, deleteBtn);
-    item.append(info, actions);
+    item.append(leading, info, actions);
     list.appendChild(item);
   });
 }
@@ -1515,7 +1518,7 @@ function buildSettingsPage() {
       </section>
       <section class="settings-section">
         <div class="settings-section-head">
-          <h3>Weiterleitung</h3>
+          <h3>Weiterleitungen</h3>
           <div id="forwarding-add-host"></div>
         </div>
         <div id="settings-forwarding" class="settings-forwarding-block">
@@ -1851,7 +1854,8 @@ function renderForwardingList() {
     const item = document.createElement("div");
     item.className = "list-item list-item-managed";
     const leading = document.createElement("div");
-    leading.className = "list-item-leading";
+    leading.className = "list-item-leading list-item-leading-icon";
+    leading.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">alt_route</span>';
     const sw = createSwitch({
       value: !!f.enabled,
       onChange: async (next) => {
@@ -1865,7 +1869,6 @@ function renderForwardingList() {
         }
       },
     });
-    leading.appendChild(sw.wrap);
     const body = document.createElement("div");
     body.className = "list-item-body";
     const t = document.createElement("strong");
@@ -1895,7 +1898,8 @@ function renderForwardingList() {
     });
     delBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} löschen`);
     delBtn.classList.add("btn-danger");
-    actions.append(editBtn, delBtn);
+    sw.wrap.classList.add("settings-inline-switch");
+    actions.append(sw.wrap, editBtn, delBtn);
     item.append(leading, body, actions);
     host.appendChild(item);
   });
