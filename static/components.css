@@ -1105,37 +1105,41 @@ main {
 
   .map-layout {
     display: grid;
-    grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     align-items: stretch;
     flex: 1;
     min-height: 0;
-    transition: grid-template-columns 0.24s ease;
-  }
-
-  .map-layout:not(.map-layout--drawer-open) {
-    grid-template-columns: 0 minmax(0, 1fr);
   }
 
   .map-filters-panel {
     position: static;
     transform: translateX(0);
-    width: auto;
+    width: min(360px, 92vw);
+    max-width: 360px;
     min-width: 0;
     overflow: auto;
     min-height: 0;
     max-height: none;
-    max-width: none;
     align-self: stretch;
     box-shadow: none;
     z-index: auto;
-    transition: opacity 0.2s ease;
+    opacity: 1;
+    transition:
+      max-width 0.28s ease,
+      opacity 0.2s ease,
+      transform 0.28s ease,
+      padding 0.28s ease;
   }
 
   .map-layout:not(.map-layout--drawer-open) .map-filters-panel {
+    max-width: 0;
     opacity: 0;
+    transform: translateX(-10px);
     pointer-events: none;
     overflow: hidden;
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .map-wrap {
