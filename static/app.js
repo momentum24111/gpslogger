@@ -1,6 +1,7 @@
 import {
   createButton,
   createField,
+  createIconButton,
   createModal,
   createSwitch,
   createToastArea,
@@ -711,6 +712,7 @@ function openSettingsModalUiOnly() {
   if (!ui.settingsEscKeyListener) {
     ui.settingsEscKeyListener = (event) => {
       if (event.key !== "Escape" || !ui.settingsModalOpen || ui.settingsUnsavedDialogOpen) return;
+      if (document.querySelector(".modal-overlay.modal-overlay--shown")) return;
       event.preventDefault();
       closeSettingsModal();
     };
@@ -1182,26 +1184,33 @@ function renderDevicesSection() {
   const addBtn = createButton({
     label: "Gerät hinzufügen",
     icon: "add",
-    onClick: () => openAddDeviceModal(),
+    onClick: () => openDeviceEditorModal(),
   });
   addBtn.classList.add("btn-primary");
   createHost.appendChild(addBtn);
   renderDeviceList();
 }
 
-async function openAddDeviceModal() {
-  let draft;
-  try {
-    draft = await api("/api/devices/draft", { method: "POST", body: JSON.stringify({}) });
-  } catch (err) {
-    pushToast(ui.toastArea, err.message, "error");
-    return;
+async function openDeviceEditorModal(device = null) {
+  const isEdit = !!device;
+  let draft = null;
+  if (!isEdit) {
+    try {
+      draft = await api("/api/devices/draft", { method: "POST", body: JSON.stringify({}) });
+    } catch (err) {
+      pushToast(ui.toastArea, err.message, "error");
+      return;
+    }
   }
   const content = document.createElement("div");
-  const nameField = createField({ label: "Name", placeholder: "z. B. Caspar" });
+  const nameField = createField({
+    label: "Name",
+    placeholder: "z. B. Caspar",
+    value: isEdit ? String(device.name || "") : "",
+  });
   const keyField = createField({
     label: "API-Key (Vorschlag editierbar, z. B. kürzerer Key; min. 8 Zeichen, keine Leerzeichen)",
-    value: draft.api_key,
+    value: isEdit ? String(device.api_key || "") : String(draft.api_key || ""),
     placeholder: "Key anpassen oder Vorschlag belassen",
   });
   content.append(nameField.field, keyField.field);
@@ -1209,7 +1218,7 @@ async function openAddDeviceModal() {
   const saveBtn = createButton({ label: "Speichern", icon: "check" });
   saveBtn.classList.add("btn-primary");
   const modal = createModal({
-    title: "Gerät hinzufügen",
+    title: isEdit ? "Gerät bearbeiten" : "Gerät hinzufügen",
     content,
     actions: [cancelBtn, saveBtn],
   });
@@ -1223,19 +1232,29 @@ async function openAddDeviceModal() {
     setFieldState(nameField, "default", "");
     setButtonLoading(saveBtn, true, "Speichert...");
     try {
-      await api("/api/devices/commit", {
-        method: "POST",
-        body: JSON.stringify({
-          draft_token: draft.draft_token,
-          name,
-          api_key: keyField.input.value.trim() || undefined,
-        }),
-      });
+      if (isEdit) {
+        await api(`/api/devices/${device.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name,
+            api_key: keyField.input.value.trim() || undefined,
+          }),
+        });
+      } else {
+        await api("/api/devices/commit", {
+          method: "POST",
+          body: JSON.stringify({
+            draft_token: draft.draft_token,
+            name,
+            api_key: keyField.input.value.trim() || undefined,
+          }),
+        });
+      }
       await loadDevices();
       await loadDeviceStatuses();
       renderDeviceList();
       renderMapDeviceList();
-      pushToast(ui.toastArea, "Gerät angelegt", "success");
+      pushToast(ui.toastArea, isEdit ? "Gerät aktualisiert" : "Gerät angelegt", "success");
       modal.close();
     } catch (err) {
       setFieldState(nameField, "error", err.message);
@@ -1269,12 +1288,12 @@ function renderDeviceList() {
     const statExtra = statBits.length
       ? `<br><small>${statBits.map((t) => escapeHtml(t)).join(" · ")}</small>`
       : "";
-    info.innerHTML = `<strong>${escapeHtml(device.name)}</strong><br><small>${escapeHtml(device.id)}</small><br><small>Last Seen: ${escapeHtml(seen)}</small><br><small>Pos: ${escapeHtml(position)}</small>${statExtra}`;
+    info.innerHTML = `<strong>${escapeHtml(device.name)}</strong><br><small>Last Seen: ${escapeHtml(seen)}</small><br><small>Pos: ${escapeHtml(position)}</small>${statExtra}`;
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
-    const copyKeyBtn = createButton({
-      label: "Key kopieren",
+    const copyKeyBtn = createIconButton({
       icon: "content_copy",
+      title: "Key kopieren",
       onClick: async () => {
         try {
           await navigator.clipboard.writeText(device.api_key || "");
@@ -1284,26 +1303,25 @@ function renderDeviceList() {
         }
       },
     });
-    const renameBtn = createButton({
-      label: "Umbenennen",
+    copyKeyBtn.setAttribute("aria-label", "Key kopieren");
+    const editBtn = createIconButton({
+      icon: "edit",
+      title: "Gerät bearbeiten",
       onClick: async () => {
-        openRenameModal(device);
+        openDeviceEditorModal(device);
       },
     });
-    const rotateBtn = createButton({
-      label: "API-Key neu",
-      onClick: async () => {
-        openRotateKeyModal(device);
-      },
-    });
-    const deleteBtn = createButton({
-      label: "Löschen",
+    editBtn.setAttribute("aria-label", `Gerät ${device.name} bearbeiten`);
+    const deleteBtn = createIconButton({
+      icon: "delete",
+      title: "Löschen",
       onClick: async () => {
         openDeleteModal(device);
       },
     });
+    deleteBtn.setAttribute("aria-label", `Gerät ${device.name} löschen`);
     deleteBtn.classList.add("btn-danger");
-    actions.append(copyKeyBtn, renameBtn, rotateBtn, deleteBtn);
+    actions.append(copyKeyBtn, editBtn, deleteBtn);
     item.append(info, actions);
     list.appendChild(item);
   });
@@ -1312,9 +1330,9 @@ function renderDeviceList() {
 function showApiKeyModal(device) {
   const keyField = createField({ label: `${device.name} API-Key`, value: device.api_key });
   keyField.input.readOnly = true;
-  const copyBtn = createButton({
-    label: "Key kopieren",
+  const copyBtn = createIconButton({
     icon: "content_copy",
+    title: "Key kopieren",
     onClick: async () => {
       try {
         await navigator.clipboard.writeText(device.api_key);
@@ -1324,6 +1342,7 @@ function showApiKeyModal(device) {
       }
     },
   });
+  copyBtn.setAttribute("aria-label", "Key kopieren");
   const content = document.createElement("div");
   content.append(keyField.field, copyBtn);
   openInfoModal({ title: "Gerät erstellt", content });
@@ -1437,14 +1456,14 @@ function buildSettingsPage() {
       <section class="settings-section">
         <h3>Weiterleitung</h3>
         <div id="settings-forwarding" class="settings-forwarding-block">
-          <div id="forwarding-add-host"></div>
           <div id="forwardings-list" class="list ui-list"></div>
+          <div id="forwarding-add-host"></div>
         </div>
       </section>
       <section class="settings-section">
         <h3>Geräte</h3>
-        <div id="devices-create" class="ui-form-grid"></div>
         <div id="devices-list" class="list ui-list"></div>
+        <div id="devices-create" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
         <h3>Aktionen</h3>
@@ -1453,8 +1472,16 @@ function buildSettingsPage() {
       <div id="settings-save-footer" class="settings-save-footer"></div>
     </div>
   `;
-  page.querySelectorAll('[data-action="close-settings"]').forEach((el) => {
-    el.addEventListener("click", () => closeSettingsModal());
+  const closeBtn = page.querySelector(".settings-modal-close");
+  closeBtn?.addEventListener("click", () => closeSettingsModal());
+  const settingsBackdrop = page.querySelector(".settings-modal-backdrop");
+  let backdropPointerDown = false;
+  settingsBackdrop?.addEventListener("pointerdown", (event) => {
+    backdropPointerDown = event.target === settingsBackdrop;
+  });
+  settingsBackdrop?.addEventListener("click", (event) => {
+    if (event.target !== settingsBackdrop || !backdropPointerDown) return;
+    closeSettingsModal();
   });
   const themeHost = page.querySelector("#settings-theme");
   const storageHost = page.querySelector("#settings-storage");
@@ -1744,14 +1771,18 @@ function renderForwardingList() {
     if (meta.textContent) body.append(document.createElement("br"), meta);
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
-    const editBtn = createButton({
-      label: "Bearbeiten",
+    const editBtn = createIconButton({
+      icon: "edit",
+      title: "Bearbeiten",
       onClick: () => openForwardingModal(f),
     });
-    const delBtn = createButton({
-      label: "Löschen",
+    editBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} bearbeiten`);
+    const delBtn = createIconButton({
+      icon: "delete",
+      title: "Löschen",
       onClick: () => openDeleteForwardingModal(f),
     });
+    delBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} löschen`);
     delBtn.classList.add("btn-danger");
     actions.append(editBtn, delBtn);
     item.append(leading, body, actions);

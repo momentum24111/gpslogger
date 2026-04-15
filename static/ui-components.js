@@ -148,14 +148,21 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
   overlay.appendChild(modal);
   let keyListener = null;
   let backdropListener = null;
+  let backdropPointerDown = null;
   let closing = false;
 
   const armCloseListeners = (self) => {
     if (closeOnBackdrop) {
+      backdropPointerDown = (event) => {
+        if (closing) return;
+        overlay.dataset.pointerDownOnOverlay = event.target === overlay ? "1" : "0";
+      };
       backdropListener = (event) => {
         if (event.target !== overlay || closing) return;
+        if (overlay.dataset.pointerDownOnOverlay !== "1") return;
         self.close();
       };
+      overlay.addEventListener("pointerdown", backdropPointerDown);
       overlay.addEventListener("click", backdropListener);
     }
     if (closeOnEscape) {
@@ -187,6 +194,10 @@ export function createModal({ title, content, actions = [], closeOnEscape = true
       if (backdropListener) {
         overlay.removeEventListener("click", backdropListener);
         backdropListener = null;
+      }
+      if (backdropPointerDown) {
+        overlay.removeEventListener("pointerdown", backdropPointerDown);
+        backdropPointerDown = null;
       }
       if (keyListener) {
         document.removeEventListener("keydown", keyListener);
