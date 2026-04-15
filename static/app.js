@@ -48,6 +48,7 @@ const ui = {
   pages: {},
   toastArea: null,
   map: null,
+  mapFitControl: null,
   layers: {},
   markers: new Map(),
   routeLines: [],
@@ -71,6 +72,8 @@ const ui = {
   settingsDirty: false,
   settingsUnsavedDialogOpen: false,
   settingsEscKeyListener: null,
+  statusModalOpen: false,
+  statusModalHost: null,
 };
 
 const MAP_COLOR_COUNT = 6;
@@ -211,14 +214,14 @@ async function runAutoRefreshCycle() {
       await loadSettings();
       await loadDevices();
       await loadDeviceStatuses();
+      renderForwardingList();
+      renderDeviceList();
+    }
+    if (ui.statusModalOpen) {
       await loadSystemStatus();
       await loadForwardingErrors();
       await loadRecentGps();
-      renderForwardingList();
-      renderDeviceList();
-      renderSystemStatus();
-      renderForwardingErrors();
-      renderRecentGps();
+      renderStatusModalContent();
     }
   } catch (_err) {
     // Hintergrund-Refresh bleibt bewusst still.
@@ -615,6 +618,69 @@ function closeMapSidebarDrawer() {
   setMapSidebarDrawerOpen(false);
 }
 
+function collectVisibleMapLatLng() {
+  const points = [];
+  ui.routePointMarkers.forEach((marker) => {
+    if (ui.map?.hasLayer(marker)) points.push(marker.getLatLng());
+  });
+  ui.markers.forEach((marker) => {
+    if (ui.map?.hasLayer(marker)) points.push(marker.getLatLng());
+  });
+  ui.routeLines.forEach((line) => {
+    if (!ui.map?.hasLayer(line)) return;
+    const latLngs = line.getLatLngs();
+    if (!Array.isArray(latLngs)) return;
+    latLngs.forEach((latLng) => {
+      if (latLng?.lat != null && latLng?.lng != null) points.push(latLng);
+    });
+  });
+  return points;
+}
+
+function zoomMapToVisiblePoints() {
+  if (!ui.map) return;
+  const points = collectVisibleMapLatLng();
+  if (!points.length) {
+    pushToast(ui.toastArea, "Keine sichtbaren Punkte zum Einpassen.", "error");
+    return;
+  }
+  const bounds = L.latLngBounds(points);
+  if (!bounds.isValid()) return;
+  ui.map.fitBounds(bounds, {
+    padding: [24, 24],
+    maxZoom: 18,
+    animate: true,
+    duration: 0.35,
+  });
+}
+
+function initMapFitControl() {
+  if (!ui.map) return;
+  if (ui.mapFitControl) {
+    ui.map.removeControl(ui.mapFitControl);
+    ui.mapFitControl = null;
+  }
+  const FitControl = L.Control.extend({
+    onAdd() {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-control-zoom-fit");
+      const btn = L.DomUtil.create("button", "leaflet-control-zoom-fit-btn", container);
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Auf sichtbare Punkte einpassen");
+      btn.title = "Auf sichtbare Punkte einpassen";
+      btn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">crop_free</span>';
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      L.DomEvent.on(btn, "click", (event) => {
+        L.DomEvent.stop(event);
+        zoomMapToVisiblePoints();
+      });
+      return container;
+    },
+  });
+  ui.mapFitControl = new FitControl({ position: "topleft" });
+  ui.map.addControl(ui.mapFitControl);
+}
+
 function toggleMapSidebarDrawer() {
   const layout = ui.mapLayoutEl;
   if (!layout) return;
@@ -922,13 +988,19 @@ function buildMapPage() {
   customDateWrap.hidden = ui.mapRange !== "custom";
   const footer = document.createElement("div");
   footer.className = "map-filters-footer";
+  const statusBtn = createButton({
+    label: "Status",
+    icon: "monitoring",
+    onClick: () => openStatusModal(),
+  });
+  statusBtn.classList.add("btn-secondary", "map-settings-btn");
   const settingsBtn = createButton({
     label: "Einstellungen",
     icon: "settings",
     onClick: () => openSettingsModal(),
   });
   settingsBtn.classList.add("btn-secondary", "map-settings-btn");
-  footer.appendChild(settingsBtn);
+  footer.append(statusBtn, settingsBtn);
   filtersHost.append(deviceListHost, rangeField, customDateWrap, footer);
 
   initMapDeviceListClosePicker();
@@ -958,6 +1030,7 @@ function buildMapPage() {
     touchZoom: true,
     attributionControl: false,
   }).setView([51.2, 10.4], 6);
+  initMapFitControl();
   ui.map.on("click", () => closePinnedRouteTooltip());
   document.addEventListener("click", (event) => {
     const target = event.target;
@@ -1177,15 +1250,16 @@ function drawPositions(positions, opts = {}) {
 }
 
 function renderDevicesSection() {
-  const createHost = document.getElementById("devices-create");
+  const createHost = document.getElementById("devices-add-host");
   const listHost = document.getElementById("devices-list");
   if (!createHost || !listHost) return;
   createHost.innerHTML = "";
-  const addBtn = createButton({
-    label: "Gerät hinzufügen",
+  const addBtn = createIconButton({
     icon: "add",
+    title: "Gerät hinzufügen",
     onClick: () => openDeviceEditorModal(),
   });
+  addBtn.setAttribute("aria-label", "Gerät hinzufügen");
   addBtn.classList.add("btn-primary");
   createHost.appendChild(addBtn);
   renderDeviceList();
@@ -1426,7 +1500,7 @@ function buildSettingsPage() {
     <div class="settings-modal-backdrop" data-action="close-settings"></div>
     <div class="card settings-card settings-modal-card">
       <div class="settings-modal-head">
-        <h2>Einstellungen</h2>
+        <h2><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Einstellungen</span></h2>
         <button type="button" class="icon-btn settings-modal-close" data-action="close-settings" aria-label="Einstellungen schließen">
           <span class="material-symbols-outlined">close</span>
         </button>
@@ -1439,31 +1513,21 @@ function buildSettingsPage() {
         <h3>Speicherung</h3>
         <div id="settings-storage" class="ui-form-grid"></div>
       </section>
-      <section class="settings-section settings-diagnostics">
-        <details class="settings-accordion">
-          <summary>Systemstatus</summary>
-          <div id="settings-system-status"></div>
-        </details>
-        <details class="settings-accordion">
-          <summary>Forwarding Fehler</summary>
-          <div id="settings-forwarding-errors"></div>
-        </details>
-        <details class="settings-accordion">
-          <summary>Letzte GPS Requests</summary>
-          <div id="settings-recent-gps"></div>
-        </details>
-      </section>
       <section class="settings-section">
-        <h3>Weiterleitung</h3>
+        <div class="settings-section-head">
+          <h3>Weiterleitung</h3>
+          <div id="forwarding-add-host"></div>
+        </div>
         <div id="settings-forwarding" class="settings-forwarding-block">
           <div id="forwardings-list" class="list ui-list"></div>
-          <div id="forwarding-add-host"></div>
         </div>
       </section>
       <section class="settings-section">
-        <h3>Geräte</h3>
+        <div class="settings-section-head">
+          <h3>Geräte</h3>
+          <div id="devices-add-host"></div>
+        </div>
         <div id="devices-list" class="list ui-list"></div>
-        <div id="devices-create" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
         <h3>Aktionen</h3>
@@ -1542,11 +1606,12 @@ function buildSettingsPage() {
   });
   themeHost.append(themeSelect.field);
   storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
-  const addFwBtn = createButton({
-    label: "Neue Weiterleitung hinzufügen",
+  const addFwBtn = createIconButton({
     icon: "add",
+    title: "Neue Weiterleitung hinzufügen",
     onClick: () => openForwardingModal(null),
   });
+  addFwBtn.setAttribute("aria-label", "Neue Weiterleitung hinzufügen");
   addFwBtn.classList.add("btn-primary");
   forwardingAddHost?.appendChild(addFwBtn);
   renderForwardingList();
@@ -1564,9 +1629,55 @@ function buildSettingsPage() {
   ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, saveBtn };
   ui.settingsDirty = false;
   renderDevicesSection();
-  renderSystemStatus();
-  renderForwardingErrors();
-  renderRecentGps();
+}
+
+async function openStatusModal() {
+  if (ui.statusModalOpen) return;
+  const content = document.createElement("div");
+  content.className = "status-modal-content";
+  content.innerHTML = `
+    <section class="settings-section">
+      <h3>Systemstatus</h3>
+      <div id="status-system-status"></div>
+    </section>
+    <section class="settings-section">
+      <h3>Forwarding Fehler</h3>
+      <div id="status-forwarding-errors"></div>
+    </section>
+    <section class="settings-section">
+      <h3>Letzte GPS Requests</h3>
+      <div id="status-recent-gps"></div>
+    </section>
+  `;
+  const closeBtn = createButton({ label: "Schließen" });
+  const modal = createModal({
+    title: "Status",
+    content,
+    actions: [closeBtn],
+  });
+  const baseClose = modal.close.bind(modal);
+  modal.close = () => {
+    ui.statusModalOpen = false;
+    ui.statusModalHost = null;
+    baseClose();
+  };
+  closeBtn.addEventListener("click", () => modal.close());
+  modal.open();
+  ui.statusModalOpen = true;
+  ui.statusModalHost = content;
+  try {
+    await Promise.all([loadSystemStatus(), loadForwardingErrors(), loadRecentGps()]);
+    renderStatusModalContent();
+  } catch (err) {
+    pushToast(ui.toastArea, err.message, "error");
+  }
+}
+
+function renderStatusModalContent() {
+  if (!ui.statusModalOpen || !ui.statusModalHost) return;
+  renderSystemStatus(ui.statusModalHost.querySelector("#status-system-status"));
+  renderForwardingErrors(ui.statusModalHost.querySelector("#status-forwarding-errors"));
+  renderRecentGps(ui.statusModalHost.querySelector("#status-recent-gps"));
 }
 
 function openForwardingModal(existing) {
@@ -1809,9 +1920,9 @@ function openDeleteForwardingModal(f) {
   });
 }
 
-function renderSystemStatus() {
-  const host = document.getElementById("settings-system-status");
-  if (!host) return;
+function renderSystemStatus(host = null) {
+  const target = host || document.getElementById("settings-system-status");
+  if (!target) return;
   const status = state.systemStatus || {};
   const uptime = Number(status.uptime_seconds || 0);
   const h = Math.floor(uptime / 3600);
@@ -1819,7 +1930,7 @@ function renderSystemStatus() {
   const s = uptime % 60;
   const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString("de-DE") : "Noch kein Lauf";
   const lastNasError = status.last_nas_error || "Kein Fehler";
-  host.innerHTML = `
+  target.innerHTML = `
     <div class="list">
       <div class="list-item"><span>Uptime</span><strong>${h}h ${m}m ${s}s</strong></div>
       <div class="list-item"><span>Geräte</span><strong>${status.device_count ?? 0}</strong></div>
@@ -1833,9 +1944,9 @@ function renderSystemStatus() {
   `;
 }
 
-function renderForwardingErrors() {
-  const host = document.getElementById("settings-forwarding-errors");
-  if (!host) return;
+function renderForwardingErrors(host = null) {
+  const target = host || document.getElementById("settings-forwarding-errors");
+  if (!target) return;
   const errors = state.forwardingErrors || [];
   const rows = errors.length
     ? errors
@@ -1845,41 +1956,41 @@ function renderForwardingErrors() {
         )
         .join("")
     : `<div class="list-item"><span>Keine Forwarding-Fehler</span></div>`;
-  host.innerHTML = `
+  target.innerHTML = `
     <div class="panel-head">
       <div class="panel-actions">
-        <button id="reload-forwarding-errors" class="btn">Neu laden</button>
-        <button id="clear-forwarding-errors" class="btn">Leeren</button>
+        <button data-action="reload-forwarding-errors" class="btn">Neu laden</button>
+        <button data-action="clear-forwarding-errors" class="btn">Leeren</button>
       </div>
     </div>
     <div class="list">${rows}</div>
   `;
-  const btn = host.querySelector("#reload-forwarding-errors");
+  const btn = target.querySelector('[data-action="reload-forwarding-errors"]');
   btn?.addEventListener("click", async () => {
     setButtonLoading(btn, true, "Lädt...");
     try {
       await loadForwardingErrors();
-      renderForwardingErrors();
+      renderForwardingErrors(target);
     } finally {
       setButtonLoading(btn, false);
     }
   });
-  const clearBtn = host.querySelector("#clear-forwarding-errors");
+  const clearBtn = target.querySelector('[data-action="clear-forwarding-errors"]');
   clearBtn?.addEventListener("click", async () => {
     setButtonLoading(clearBtn, true, "Löscht...");
     try {
       await api("/api/forwarding/errors/clear", { method: "POST" });
       await loadForwardingErrors();
-      renderForwardingErrors();
+      renderForwardingErrors(target);
     } finally {
       setButtonLoading(clearBtn, false);
     }
   });
 }
 
-function renderRecentGps() {
-  const host = document.getElementById("settings-recent-gps");
-  if (!host) return;
+function renderRecentGps(host = null) {
+  const target = host || document.getElementById("settings-recent-gps");
+  if (!target) return;
   const rows = (state.recentGps || [])
     .map((entry) => {
       const title = entry.device_name || entry.device_id || "Unbekannt";
@@ -1899,20 +2010,20 @@ function renderRecentGps() {
       return `<div class="list-item"><span>${escapeHtml(title)} | ${escapeHtml(ts)}</span><small>${escapeHtml(parts.join(" · "))}</small></div>`;
     })
     .join("");
-  host.innerHTML = `
+  target.innerHTML = `
     <div class="panel-head">
       <div class="panel-actions">
-        <button id="reload-recent-gps" class="btn">Neu laden</button>
+        <button data-action="reload-recent-gps" class="btn">Neu laden</button>
       </div>
     </div>
     <div class="list">${rows || `<div class="list-item"><span>Keine GPS-Daten</span></div>`}</div>
   `;
-  const btn = host.querySelector("#reload-recent-gps");
+  const btn = target.querySelector('[data-action="reload-recent-gps"]');
   btn?.addEventListener("click", async () => {
     setButtonLoading(btn, true, "Lädt...");
     try {
       await loadRecentGps();
-      renderRecentGps();
+      renderRecentGps(target);
     } finally {
       setButtonLoading(btn, false);
     }

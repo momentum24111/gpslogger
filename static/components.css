@@ -381,6 +381,8 @@ main {
 }
 
 .map-filters-footer {
+  display: grid;
+  gap: var(--spacing-sm);
   margin-top: auto;
   padding-top: var(--spacing-sm);
 }
@@ -536,6 +538,27 @@ main {
 .map-wrap .leaflet-control-container,
 .map-wrap .leaflet-bottom {
   z-index: 2;
+}
+
+.leaflet-control-zoom-fit {
+  margin-top: 10px;
+}
+
+.leaflet-control-zoom-fit-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  cursor: pointer;
+  background: var(--card-bg, var(--color-surface));
+  color: var(--color-text, #1a1d24);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leaflet-control-zoom-fit-btn .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .map-wrap .leaflet-control-attribution {
@@ -769,6 +792,17 @@ main {
 }
 
 .settings-section > h3 {
+  margin: 0;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.settings-section-head > h3 {
   margin: 0;
 }
 
@@ -1212,12 +1246,24 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-sm);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card-bg, var(--color-surface));
+  padding-bottom: var(--spacing-sm);
   margin-bottom: var(--spacing-md);
 }
 
 .settings-modal-head h2 {
   margin: 0;
   font-size: 1.05rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.settings-modal-head h2 .material-symbols-outlined {
+  font-size: 20px;
 }
 
 @media (max-width: 899px) {

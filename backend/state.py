@@ -290,14 +290,37 @@ class AppState:
             self._persist_devices()
             return dict(device)
 
+    def _validate_device_api_key_for_update(self, key: str, device_id: str) -> str:
+        k = str(key).strip()
+        if len(k) < 8:
+            raise ValueError("API-Key muss mindestens 8 Zeichen lang sein")
+        if len(k) > 128:
+            raise ValueError("API-Key darf maximal 128 Zeichen lang sein")
+        if any(ch.isspace() for ch in k):
+            raise ValueError("API-Key darf keine Leerzeichen enthalten")
+        for d in self.devices:
+            if d.get("id") == device_id:
+                continue
+            if d.get("api_key") == k:
+                raise ValueError("Dieser API-Key ist bereits vergeben")
+        return k
+
     def update_device(
-        self, device_id: str, name: str, *, map_color_index: int | None = None
+        self,
+        device_id: str,
+        name: str,
+        *,
+        map_color_index: int | None = None,
+        api_key: str | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             cleaned_name = self._validate_device_name(name, exclude_id=device_id)
+            cleaned_key = self._validate_device_api_key_for_update(api_key, device_id) if api_key is not None else None
             for device in self.devices:
                 if device["id"] == device_id:
                     device["name"] = cleaned_name
+                    if cleaned_key is not None:
+                        device["api_key"] = cleaned_key
                     if map_color_index is not None:
                         device["map_color_index"] = map_color_index % DEVICE_MAP_COLOR_COUNT
                     elif device.get("map_color_index") is None:

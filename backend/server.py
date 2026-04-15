@@ -635,6 +635,9 @@ class Handler(BaseHTTPRequestHandler):
             name = str(body.get("name", "")).strip()
             if not name:
                 return json_response(self, {"error": "Name ist erforderlich"}, HTTPStatus.BAD_REQUEST)
+            api_key = body.get("api_key")
+            if api_key is not None and not isinstance(api_key, str):
+                return json_response(self, {"error": "api_key muss ein Text sein"}, HTTPStatus.BAD_REQUEST)
             map_color_index = None
             if "map_color_index" in body and body.get("map_color_index") is not None:
                 try:
@@ -642,7 +645,7 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             try:
-                device = state.update_device(device_id, name, map_color_index=map_color_index)
+                device = state.update_device(device_id, name, map_color_index=map_color_index, api_key=api_key)
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             if not device:
