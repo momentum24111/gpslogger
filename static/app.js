@@ -902,7 +902,6 @@ function openUnsavedSettingsCloseConfirm(afterResolved) {
 }
 
 function openSettingsModal() {
-  closeMapSidebarDrawer();
   if (location.hash === SETTINGS_HASH) {
     openSettingsModalUiOnly();
   } else {
