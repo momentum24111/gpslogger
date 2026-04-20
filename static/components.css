@@ -742,7 +742,7 @@ main {
 }
 
 .modal {
-  width: min(520px, 100%);
+  width: min(1100px, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
   background: var(--modal-bg, var(--color-surface));
   border-radius: var(--radius-lg);
@@ -1248,6 +1248,7 @@ main {
   position: relative;
   z-index: 1;
   margin: 1rem;
+  width: min(1100px, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
   opacity: 0;
