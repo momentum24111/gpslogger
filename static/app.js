@@ -1653,7 +1653,7 @@ async function openStatusModal() {
   `;
   const closeBtn = createButton({ label: "Schließen" });
   const modal = createModal({
-    title: "Status",
+    title: '<span class="material-symbols-outlined" aria-hidden="true">monitoring</span><span>Status</span>',
     content,
     actions: [closeBtn],
     routeHash: "#status",

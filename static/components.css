@@ -743,6 +743,7 @@ main {
 
 .modal {
   width: min(1100px, calc(100vw - 2rem));
+  height: calc(100dvh - 2rem);
   max-height: calc(100dvh - 2rem);
   background: var(--modal-bg, var(--color-surface));
   border-radius: var(--radius-lg);
@@ -773,6 +774,13 @@ main {
 
 .modal-head h3 {
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.modal-head h3 .material-symbols-outlined {
+  font-size: 20px;
 }
 
 .modal-body {
@@ -1220,10 +1228,12 @@ main {
   inset: 0;
   display: none;
   z-index: 1500;
+  padding: var(--spacing-lg);
+  place-items: center;
 }
 
 .settings-modal.active {
-  display: block;
+  display: grid;
 }
 
 .settings-modal.active:not(.settings-modal--shown) {
@@ -1247,8 +1257,9 @@ main {
 .settings-modal-card {
   position: relative;
   z-index: 1;
-  margin: 1rem;
+  margin: 0;
   width: min(1100px, calc(100vw - 2rem));
+  height: calc(100dvh - 2rem);
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
   opacity: 0;
@@ -1280,6 +1291,7 @@ main {
   padding-bottom: var(--spacing-sm);
   margin-bottom: var(--spacing-md);
 }
+
 
 .settings-modal-head h2 {
   margin: 0;
