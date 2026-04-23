@@ -79,15 +79,130 @@ export function setFieldState(fieldObj, state = "default", message = "") {
 export function createToastArea() {
   const area = document.createElement("div");
   area.className = "toast-area";
+  area.dataset.toastInitialized = "0";
+  area.dataset.toastCounter = "0";
   return area;
 }
 
-export function pushToast(area, text, level = "success") {
-  const item = document.createElement("div");
-  item.className = `toast ${level}`;
-  item.textContent = text;
-  area.appendChild(item);
-  setTimeout(() => item.remove(), 2800);
+const TOAST_MAX_VISIBLE = 4;
+const TOAST_DEFAULT_DURATION_MS = 4200;
+const TOAST_LEAVE_DURATION_MS = 260;
+const TOAST_VARIANTS = {
+  success: {
+    icon: "check_circle",
+    title: "Erfolg",
+  },
+  error: {
+    icon: "error",
+    title: "Fehler",
+  },
+  info: {
+    icon: "info",
+    title: "Hinweis",
+  },
+};
+
+function getToastState(area) {
+  if (!area.__toastState) {
+    area.__toastState = {
+      queue: [],
+      visible: new Map(),
+      initialized: false,
+    };
+  }
+  return area.__toastState;
+}
+
+function normalizeToastInput(inputOrText, level) {
+  if (typeof inputOrText === "string") {
+    return {
+      level: level || "success",
+      title: "",
+      description: inputOrText,
+      durationMs: TOAST_DEFAULT_DURATION_MS,
+      icon: "",
+    };
+  }
+  const input = inputOrText && typeof inputOrText === "object" ? inputOrText : {};
+  return {
+    level: input.level || level || "success",
+    title: String(input.title || "").trim(),
+    description: String(input.description || input.text || "").trim(),
+    durationMs: Number.isFinite(Number(input.durationMs)) ? Math.max(1200, Number(input.durationMs)) : TOAST_DEFAULT_DURATION_MS,
+    icon: String(input.icon || "").trim(),
+  };
+}
+
+function createToastElement(toast) {
+  const variant = TOAST_VARIANTS[toast.level] || TOAST_VARIANTS.info;
+  const item = document.createElement("article");
+  item.className = `toast toast--${toast.level}`;
+  item.setAttribute("role", toast.level === "error" ? "alert" : "status");
+  const iconName = toast.icon || variant.icon;
+  const titleText = toast.title || variant.title;
+  item.innerHTML = `
+    <div class="toast-icon" aria-hidden="true"><span class="material-symbols-outlined">${iconName}</span></div>
+    <div class="toast-content">
+      <div class="toast-title">${titleText}</div>
+      <div class="toast-description">${toast.description}</div>
+    </div>
+    <button class="toast-close icon-btn" type="button" aria-label="Toast schließen">
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>
+    </button>
+  `;
+  return item;
+}
+
+function removeToast(area, id) {
+  const state = getToastState(area);
+  const entry = state.visible.get(id);
+  if (!entry || entry.leaving) return;
+  entry.leaving = true;
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+    entry.timer = null;
+  }
+  entry.el.classList.add("is-leaving");
+  window.setTimeout(() => {
+    entry.el.remove();
+    state.visible.delete(id);
+    drainToastQueue(area);
+  }, TOAST_LEAVE_DURATION_MS);
+}
+
+function drainToastQueue(area) {
+  const state = getToastState(area);
+  while (state.visible.size < TOAST_MAX_VISIBLE && state.queue.length > 0) {
+    const next = state.queue.shift();
+    const id = String(Number(area.dataset.toastCounter || "0") + 1);
+    area.dataset.toastCounter = id;
+    const el = createToastElement(next);
+    const closeBtn = el.querySelector(".toast-close");
+    const entry = {
+      id,
+      el,
+      timer: null,
+      leaving: false,
+    };
+    state.visible.set(id, entry);
+    closeBtn?.addEventListener("click", () => removeToast(area, id));
+    area.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("is-visible"));
+    entry.timer = window.setTimeout(() => removeToast(area, id), next.durationMs);
+  }
+}
+
+export function pushToast(area, inputOrText, level = "success") {
+  if (!area) return;
+  const state = getToastState(area);
+  if (!state.initialized) {
+    area.dataset.toastInitialized = "1";
+    state.initialized = true;
+  }
+  const normalized = normalizeToastInput(inputOrText, level);
+  if (!normalized.description) return;
+  state.queue.push(normalized);
+  drainToastQueue(area);
 }
 
 export function setButtonLoading(button, isLoading, loadingLabel = "Lädt...") {

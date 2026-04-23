@@ -1886,6 +1886,12 @@ function renderForwardingList() {
     if (meta.textContent) body.append(document.createElement("br"), meta);
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
+    const testBtn = createIconButton({
+      icon: "science",
+      title: "Testen",
+      onClick: () => runForwardingTest(f, testBtn),
+    });
+    testBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} testen`);
     const editBtn = createIconButton({
       icon: "edit",
       title: "Bearbeiten",
@@ -1900,10 +1906,76 @@ function renderForwardingList() {
     delBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} löschen`);
     delBtn.classList.add("btn-danger");
     sw.wrap.classList.add("settings-inline-switch");
-    actions.append(sw.wrap, editBtn, delBtn);
+    actions.append(sw.wrap, testBtn, editBtn, delBtn);
     item.append(leading, body, actions);
     host.appendChild(item);
   });
+}
+
+async function runForwardingTest(forwarding, triggerBtn = null) {
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.classList.add("loading");
+  }
+  try {
+    const res = await api(`/api/forwardings/${forwarding.id}/test`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    const result = res.result || {};
+    const devicesTotal = Number(result.devices_total || 0);
+    const withPosition = Number(result.devices_with_position || 0);
+    const delivered = Number(result.requests_delivered || 0);
+    const failed = Number(result.requests_failed || 0);
+    if (devicesTotal === 0) {
+      pushToast(ui.toastArea, {
+        level: "error",
+        title: "Kein Test durchgeführt",
+        description: "Es sind keine Geräte vorhanden.",
+      });
+      return;
+    }
+    if (withPosition === 0) {
+      pushToast(ui.toastArea, {
+        level: "error",
+        title: "Kein Test durchgeführt",
+        description: "Kein Gerät hat eine letzte Position.",
+      });
+      return;
+    }
+    if (delivered > 0 && failed === 0) {
+      pushToast(ui.toastArea, {
+        level: "success",
+        title: "Weiterleitung getestet",
+        description: `${delivered} Test-Request(s) für "${forwarding.name}" erfolgreich gesendet.`,
+      });
+      return;
+    }
+    if (delivered > 0 && failed > 0) {
+      pushToast(ui.toastArea, {
+        level: "error",
+        title: "Test teilweise fehlgeschlagen",
+        description: `${delivered} erfolgreich, ${failed} fehlgeschlagen.`,
+      });
+      return;
+    }
+    pushToast(ui.toastArea, {
+      level: "error",
+      title: "Test fehlgeschlagen",
+      description: `Für "${forwarding.name}" konnte kein Test-Request zugestellt werden.`,
+    });
+  } catch (err) {
+    pushToast(ui.toastArea, {
+      level: "error",
+      title: "Test fehlgeschlagen",
+      description: err.message,
+    });
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.classList.remove("loading");
+    }
+  }
 }
 
 function openDeleteForwardingModal(f) {

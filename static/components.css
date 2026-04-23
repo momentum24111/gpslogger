@@ -702,25 +702,102 @@ main {
 
 .toast-area {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  top: var(--toast-top, 1rem);
+  right: var(--toast-right, 1rem);
   display: grid;
-  gap: var(--spacing-sm);
+  gap: var(--toast-gap, var(--spacing-sm));
   z-index: 1200;
+  width: min(var(--toast-width), calc(100vw - 2rem));
+  pointer-events: none;
 }
 
 .toast {
-  padding: var(--spacing-md) var(--spacing-lg);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-md);
   border-radius: var(--radius-md);
   background: var(--toast-bg, var(--color-surface));
+  border: 1px solid var(--toast-border, var(--color-border));
+  box-shadow: var(--toast-shadow, none);
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
 }
 
-.toast.success {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-success) 30%, transparent);
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
-.toast.error {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error) 30%, transparent);
+.toast.is-leaving {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
+}
+
+.toast::before {
+  content: "";
+  width: var(--toast-accent-width, 4px);
+  border-radius: 999px;
+  align-self: stretch;
+  background: var(--toast-accent, var(--color-primary));
+}
+
+.toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--toast-icon-fg, var(--toast-fg, var(--color-text)));
+  margin-top: 1px;
+}
+
+.toast-icon .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.toast-content {
+  min-width: 0;
+}
+
+.toast-title {
+  font-size: 0.875rem;
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--toast-title-fg, var(--toast-fg, var(--color-text)));
+}
+
+.toast-description {
+  margin-top: 0.1rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--toast-content-fg, var(--toast-fg, var(--color-text)));
+}
+
+.toast-close {
+  width: 1.75rem;
+  height: 1.75rem;
+  min-height: 1.75rem;
+}
+
+.toast-close .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.toast--success {
+  --toast-accent: var(--color-success);
+}
+
+.toast--error {
+  --toast-accent: var(--color-error);
+}
+
+.toast--info {
+  --toast-accent: var(--color-primary);
 }
 
 .modal-overlay {

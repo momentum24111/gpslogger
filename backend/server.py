@@ -216,12 +216,83 @@ def build_outgoing_forward_headers(fwd: dict, source_headers: dict) -> dict:
     return headers
 
 
+def build_test_forwarding_record(device: dict, status: dict) -> dict:
+    timestamp = str(status.get("last_seen") or utc_now_iso())
+    fields = {
+        "latitude": status.get("latitude"),
+        "longitude": status.get("longitude"),
+        "accuracy": status.get("accuracy"),
+        "timestamp": timestamp,
+    }
+    if status.get("battery") is not None:
+        fields["battery"] = status.get("battery")
+    if status.get("speed") is not None:
+        fields["speed"] = status.get("speed")
+    if status.get("direction") is not None:
+        fields["direction"] = status.get("direction")
+    if status.get("altitude") is not None:
+        fields["altitude"] = status.get("altitude")
+    if status.get("provider") is not None:
+        fields["provider"] = status.get("provider")
+    if status.get("activity") is not None:
+        fields["activity"] = status.get("activity")
+    if status.get("device") is not None:
+        fields["device"] = status.get("device")
+    raw_body = urlparse.urlencode({k: "" if v is None else str(v) for k, v in fields.items()})
+    return {
+        "device_id": device.get("id"),
+        "device_name": device.get("name"),
+        "latitude": status.get("latitude"),
+        "longitude": status.get("longitude"),
+        "accuracy": status.get("accuracy"),
+        "timestamp": timestamp,
+        "ingest_route": "/api/forwarding-test",
+        "headers": {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-GPSLogger-Test": "1",
+        },
+        "raw_body": raw_body,
+        "received_at": utc_now_iso(),
+    }
+
+
 def is_http_url(value: str) -> bool:
     try:
         parsed = urlparse.urlparse(value)
     except Exception:
         return False
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_disabled: bool = False) -> dict:
+    stats = {"attempted": 0, "delivered": 0, "failed": 0}
+    raw_in_headers = item.get("headers") or {}
+    raw_body_text = item.get("raw_body", "") or ""
+    for fwd in forwardings:
+        if not isinstance(fwd, dict):
+            continue
+        if not allow_disabled and not fwd.get("enabled"):
+            continue
+        url = str(fwd.get("url", "")).strip()
+        if not url or not is_http_url(url):
+            continue
+        stats["attempted"] += 1
+        headers = build_outgoing_forward_headers(fwd, raw_in_headers)
+        if fwd.get("forward_body_from_source", True):
+            payload_bytes = raw_body_text.encode("utf-8")
+        else:
+            payload_bytes = b""
+        try:
+            req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
+            with urlrequest.urlopen(req, timeout=6):
+                pass
+            stats["delivered"] += 1
+        except Exception as exc:
+            stats["failed"] += 1
+            label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
+            print(f"[forwarding] error ({label}): {exc}")
+            state.append_forwarding_error(f"{label}: {exc}")
+    return stats
 
 
 def forwarding_worker():
@@ -232,28 +303,7 @@ def forwarding_worker():
             forwardings = settings.get("forwardings") or []
             if not isinstance(forwardings, list):
                 continue
-            raw_in_headers = item.get("headers") or {}
-            raw_body_text = item.get("raw_body", "") or ""
-            for fwd in forwardings:
-                if not isinstance(fwd, dict) or not fwd.get("enabled"):
-                    continue
-                url = str(fwd.get("url", "")).strip()
-                if not url or not is_http_url(url):
-                    continue
-                nfwd = state._normalize_forwarding_entry(fwd)
-                headers = build_outgoing_forward_headers(nfwd, raw_in_headers)
-                if nfwd.get("forward_body_from_source", True):
-                    payload_bytes = raw_body_text.encode("utf-8")
-                else:
-                    payload_bytes = b""
-                try:
-                    req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
-                    with urlrequest.urlopen(req, timeout=6):
-                        pass
-                except Exception as exc:
-                    label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
-                    print(f"[forwarding] error ({label}): {exc}")
-                    state.append_forwarding_error(f"{label}: {exc}")
+            forward_record_to_forwardings(item, forwardings, allow_disabled=False)
         except Exception as exc:
             print(f"[forwarding] error: {exc}")
             state.append_forwarding_error(str(exc))
@@ -562,6 +612,52 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return json_response(self, {"forwarding": forwarding}, HTTPStatus.CREATED)
+
+        if route.startswith("/api/forwardings/") and route.endswith("/test"):
+            forward_id = route.removeprefix("/api/forwardings/").removesuffix("/test")
+            selected = None
+            for fwd in state.list_forwardings():
+                if str(fwd.get("id")) == str(forward_id):
+                    selected = fwd
+                    break
+            if not selected:
+                return json_response(self, {"error": "Weiterleitung nicht gefunden"}, HTTPStatus.NOT_FOUND)
+            devices = state.list_devices()
+            statuses = state.get_device_statuses()
+            if not devices:
+                return json_response(
+                    self,
+                    {"ok": True, "result": {"devices_total": 0, "devices_with_position": 0, "requests_attempted": 0, "requests_delivered": 0, "requests_failed": 0}},
+                )
+            total_with_position = 0
+            attempted = 0
+            delivered = 0
+            failed = 0
+            for device in devices:
+                st = statuses.get(device.get("id")) or {}
+                lat = st.get("latitude")
+                lon = st.get("longitude")
+                if lat is None or lon is None:
+                    continue
+                total_with_position += 1
+                record = build_test_forwarding_record(device, st)
+                row = forward_record_to_forwardings(record, [selected], allow_disabled=True)
+                attempted += int(row.get("attempted", 0))
+                delivered += int(row.get("delivered", 0))
+                failed += int(row.get("failed", 0))
+            return json_response(
+                self,
+                {
+                    "ok": True,
+                    "result": {
+                        "devices_total": len(devices),
+                        "devices_with_position": total_with_position,
+                        "requests_attempted": attempted,
+                        "requests_delivered": delivered,
+                        "requests_failed": failed,
+                    },
+                },
+            )
 
         if route == "/api/save-now":
             try:
