@@ -13,6 +13,20 @@ DEVICE_DRAFT_TTL_SEC = 900
 
 # Index 0..N-1 verweist auf Theme-Variablen --device-map-palette-{i} (Farben nur in theme.css).
 DEVICE_MAP_COLOR_COUNT = 6
+FORWARDING_BODY_SOURCES = {
+    "latitude",
+    "longitude",
+    "device_name",
+    "accuracy",
+    "battery",
+    "speed",
+    "direction",
+    "altitude",
+    "provider",
+    "activity",
+    "timestamp",
+    "device_id",
+}
 
 DEFAULT_SETTINGS = {
     "nas_interval_seconds": 60,
@@ -142,6 +156,20 @@ class AppState:
         else:
             forward_body_from_source = True
 
+        body_fields_raw = raw.get("body_fields")
+        body_fields: list[dict[str, str]] = []
+        if isinstance(body_fields_raw, list):
+            for entry in body_fields_raw:
+                if not isinstance(entry, dict):
+                    continue
+                param = str(entry.get("param", "")).strip()
+                source = str(entry.get("source", "")).strip()
+                if not param or not source:
+                    continue
+                if source not in FORWARDING_BODY_SOURCES:
+                    continue
+                body_fields.append({"param": param, "source": source})
+
         return {
             "id": hid,
             "name": str(raw.get("name", "")).strip() or "Weiterleitung",
@@ -150,7 +178,27 @@ class AppState:
             "enabled": bool(raw.get("enabled")),
             "incoming_headers_only": incoming_headers_only,
             "forward_body_from_source": forward_body_from_source,
+            "body_fields": body_fields,
         }
+
+    @staticmethod
+    def _validate_forwarding_body_fields(body_fields: Any) -> list[dict[str, str]]:
+        if body_fields is None:
+            return []
+        if not isinstance(body_fields, list):
+            raise ValueError("body_fields muss eine Liste sein")
+        normalized: list[dict[str, str]] = []
+        for entry in body_fields:
+            if not isinstance(entry, dict):
+                continue
+            param = str(entry.get("param", "")).strip()
+            source = str(entry.get("source", "")).strip()
+            if not param:
+                continue
+            if source not in FORWARDING_BODY_SOURCES:
+                raise ValueError(f"Unbekannte Body-Quelle: {source}")
+            normalized.append({"param": param, "source": source})
+        return normalized
 
     def _purge_device_drafts(self) -> None:
         now = time.time()
@@ -461,6 +509,7 @@ class AppState:
         *,
         incoming_headers_only: bool = True,
         forward_body_from_source: bool = True,
+        body_fields: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             u = str(url).strip()
@@ -470,6 +519,9 @@ class AppState:
                 raise ValueError("URL muss mit http:// oder https:// beginnen")
             n = str(name).strip() or "Weiterleitung"
             h = dict(headers) if isinstance(headers, dict) else {}
+            normalized_body_fields = self._validate_forwarding_body_fields(body_fields)
+            if not bool(forward_body_from_source) and len(normalized_body_fields) == 0:
+                raise ValueError("Body-Konfiguration erforderlich, wenn Body-Übernahme deaktiviert ist")
             entry = {
                 "id": str(uuid.uuid4()),
                 "name": n,
@@ -478,6 +530,7 @@ class AppState:
                 "enabled": bool(enabled),
                 "incoming_headers_only": bool(incoming_headers_only),
                 "forward_body_from_source": bool(forward_body_from_source),
+                "body_fields": normalized_body_fields,
             }
             forwardings = list(self.settings.get("forwardings") or [])
             if not isinstance(forwardings, list):
@@ -497,6 +550,7 @@ class AppState:
         *,
         incoming_headers_only: bool = True,
         forward_body_from_source: bool = True,
+        body_fields: list[dict[str, str]] | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             u = str(url).strip()
@@ -506,6 +560,9 @@ class AppState:
                 raise ValueError("URL muss mit http:// oder https:// beginnen")
             n = str(name).strip() or "Weiterleitung"
             h = dict(headers) if isinstance(headers, dict) else {}
+            normalized_body_fields = self._validate_forwarding_body_fields(body_fields)
+            if not bool(forward_body_from_source) and len(normalized_body_fields) == 0:
+                raise ValueError("Body-Konfiguration erforderlich, wenn Body-Übernahme deaktiviert ist")
             forwardings = list(self.settings.get("forwardings") or [])
             if not isinstance(forwardings, list):
                 return None
@@ -519,6 +576,7 @@ class AppState:
                         "enabled": bool(enabled),
                         "incoming_headers_only": bool(incoming_headers_only),
                         "forward_body_from_source": bool(forward_body_from_source),
+                        "body_fields": normalized_body_fields,
                     }
                     self.settings["forwardings"] = forwardings
                     self._persist_settings()

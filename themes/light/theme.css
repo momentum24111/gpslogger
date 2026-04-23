@@ -103,6 +103,10 @@
   --forwarding-test-muted-fg: var(--color-text-muted);
   --forwarding-test-row-bg: color-mix(in srgb, var(--color-surface-elevated) 88%, var(--color-bg));
   --forwarding-test-row-muted-fg: var(--color-text-muted);
+  --forwarding-body-preview-bg: color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-bg));
+  --forwarding-body-preview-border: var(--color-border);
+  --forwarding-body-preview-fg: var(--color-text);
+  --forwarding-body-builder-error-fg: var(--color-error);
 
   --control-bg: #ffffff;
   --control-border: #c4cad8;

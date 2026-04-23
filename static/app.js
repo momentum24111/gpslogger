@@ -81,6 +81,20 @@ const MAP_RANGE_CURRENT = "current";
 const STORAGE_VISIBLE = "gpslogger.map.visibleDeviceIds";
 const STORAGE_DEVICE_SNAPSHOT = "gpslogger.map.deviceIdsSnapshot";
 const SETTINGS_HASH = "#settings";
+const FORWARDING_BODY_VARIABLES = [
+  { key: "latitude", label: "Latitude" },
+  { key: "longitude", label: "Longitude" },
+  { key: "device_name", label: "Gerätename" },
+  { key: "accuracy", label: "Accuracy" },
+  { key: "battery", label: "Battery" },
+  { key: "speed", label: "Speed" },
+  { key: "direction", label: "Direction" },
+  { key: "altitude", label: "Altitude" },
+  { key: "provider", label: "Provider" },
+  { key: "activity", label: "Activity" },
+  { key: "timestamp", label: "Timestamp/Zeit" },
+  { key: "device_id", label: "Device ID" },
+];
 
 const state = {
   devices: [],
@@ -1798,13 +1812,148 @@ function openForwardingModal(existing) {
     existing == null || existing.forward_body_from_source !== false;
   const bodyHint = document.createElement("p");
   bodyHint.className = "forwarding-hint";
+  const bodyBuilderWrap = document.createElement("div");
+  bodyBuilderWrap.className = "forwarding-body-builder";
+  const bodyBuilderRows = document.createElement("div");
+  bodyBuilderRows.className = "forwarding-body-builder-rows";
+  const bodyBuilderActions = document.createElement("div");
+  bodyBuilderActions.className = "forwarding-body-builder-actions";
+  const addBodyRowBtn = createButton({ label: "Feld hinzufügen", icon: "add" });
+  addBodyRowBtn.classList.add("btn-secondary");
+  const chipsWrap = document.createElement("div");
+  chipsWrap.className = "forwarding-body-builder-chips";
+  const previewTitle = document.createElement("div");
+  previewTitle.className = "forwarding-body-preview-title";
+  previewTitle.textContent = "Vorschau (read only)";
+  const preview = document.createElement("pre");
+  preview.className = "forwarding-body-preview";
+  const builderError = document.createElement("small");
+  builderError.className = "forwarding-body-builder-error";
+  const bodyRows = Array.isArray(existing?.body_fields) ? existing.body_fields.map((x) => ({ ...x })) : [];
+  function defaultBodyRows() {
+    return [
+      { param: "latitude", source: "latitude" },
+      { param: "longitude", source: "longitude" },
+      { param: "device", source: "device_name" },
+    ];
+  }
+  if (!bodyRows.length && existing == null) {
+    bodyRows.push(...defaultBodyRows());
+  }
+  function renderBodyBuilderRows() {
+    bodyBuilderRows.innerHTML = "";
+    bodyRows.forEach((row, index) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "forwarding-body-row";
+      const paramInput = document.createElement("input");
+      paramInput.className = "input forwarding-body-param";
+      paramInput.placeholder = "Parametername";
+      paramInput.value = row.param || "";
+      const sourceSelect = document.createElement("select");
+      sourceSelect.className = "select forwarding-body-source";
+      sourceSelect.innerHTML = FORWARDING_BODY_VARIABLES.map((entry) => `<option value="${entry.key}">${entry.label}</option>`).join("");
+      sourceSelect.value = row.source || FORWARDING_BODY_VARIABLES[0].key;
+      const upBtn = createIconButton({
+        icon: "arrow_upward",
+        title: "Nach oben",
+        onClick: () => {
+          if (index === 0) return;
+          const prev = bodyRows[index - 1];
+          bodyRows[index - 1] = bodyRows[index];
+          bodyRows[index] = prev;
+          renderBodyBuilderRows();
+        },
+      });
+      const downBtn = createIconButton({
+        icon: "arrow_downward",
+        title: "Nach unten",
+        onClick: () => {
+          if (index >= bodyRows.length - 1) return;
+          const next = bodyRows[index + 1];
+          bodyRows[index + 1] = bodyRows[index];
+          bodyRows[index] = next;
+          renderBodyBuilderRows();
+        },
+      });
+      const removeBtn = createIconButton({
+        icon: "delete",
+        title: "Feld entfernen",
+        onClick: () => {
+          bodyRows.splice(index, 1);
+          renderBodyBuilderRows();
+        },
+      });
+      removeBtn.classList.add("btn-danger");
+      paramInput.addEventListener("input", () => {
+        bodyRows[index].param = paramInput.value;
+        renderBodyBuilderPreview();
+      });
+      sourceSelect.addEventListener("change", () => {
+        bodyRows[index].source = sourceSelect.value;
+        renderBodyBuilderPreview();
+      });
+      rowEl.append(paramInput, sourceSelect, upBtn, downBtn, removeBtn);
+      bodyBuilderRows.appendChild(rowEl);
+    });
+    renderBodyBuilderPreview();
+  }
+  function renderBodyBuilderPreview() {
+    const pairs = bodyRows
+      .map((row) => ({
+        param: String(row.param || "").trim(),
+        source: String(row.source || "").trim(),
+      }))
+      .filter((row) => row.param && row.source);
+    if (!pairs.length) {
+      preview.textContent = "Kein Body-Feld konfiguriert.";
+      return;
+    }
+    preview.textContent = pairs
+      .map((row) => {
+        const varLabel = FORWARDING_BODY_VARIABLES.find((entry) => entry.key === row.source)?.label || row.source;
+        return `${encodeURIComponent(row.param)}=<${varLabel}>`;
+      })
+      .join("&");
+  }
+  function sanitizeBodyRows() {
+    return bodyRows
+      .map((row) => ({
+        param: String(row.param || "").trim(),
+        source: String(row.source || "").trim(),
+      }))
+      .filter((row) => row.param && row.source);
+  }
+  function setBodyBuilderError(text) {
+    builderError.textContent = text || "";
+    bodyBuilderWrap.classList.toggle("is-error", !!text);
+  }
+  addBodyRowBtn.addEventListener("click", () => {
+    bodyRows.push({ param: "", source: FORWARDING_BODY_VARIABLES[0].key });
+    renderBodyBuilderRows();
+  });
+  FORWARDING_BODY_VARIABLES.forEach((entry) => {
+    const chip = createButton({
+      label: entry.label,
+      onClick: () => {
+        bodyRows.push({ param: entry.key, source: entry.key });
+        renderBodyBuilderRows();
+      },
+    });
+    chip.classList.add("btn-secondary", "forwarding-body-chip");
+    chipsWrap.appendChild(chip);
+  });
+  bodyBuilderActions.append(addBodyRowBtn);
+  bodyBuilderWrap.append(bodyBuilderRows, bodyBuilderActions, chipsWrap, previewTitle, preview, builderError);
+  renderBodyBuilderRows();
   function syncBodyHint(forwardRawBody) {
     if (forwardRawBody) {
       bodyHint.textContent =
         "Der Roh-Body der Geräte-Anfrage (z. B. application/x-www-form-urlencoded) wird unverändert als POST an die Ziel-URL gesendet. Eine manuelle Body-Eingabe entfällt.";
+      bodyBuilderWrap.hidden = true;
     } else {
       bodyHint.textContent =
-        "Es wird kein Nutzdatenkörper mitgesendet (leerer HTTP-Body). Header richten sich nach den Einstellungen im Bereich „Header“.";
+        "Der HTTP-Body wird über den Body-Builder aus bekannten Variablen aufgebaut.";
+      bodyBuilderWrap.hidden = false;
     }
   }
   const bodyFromDeviceSw = createSwitch({
@@ -1815,7 +1964,7 @@ function openForwardingModal(existing) {
     },
   });
   syncBodyHint(bodyFromSrc);
-  bodySection.append(bodyTitle, bodyFromDeviceSw.wrap, bodyHint);
+  bodySection.append(bodyTitle, bodyFromDeviceSw.wrap, bodyHint, bodyBuilderWrap);
 
   const sectionsWrap = document.createElement("div");
   sectionsWrap.className = "forwarding-modal-sections";
@@ -1834,6 +1983,12 @@ function openForwardingModal(existing) {
   primaryBtn.addEventListener("click", async () => {
     const incoming_headers_only = hdrFromDeviceSw.toggle.classList.contains("enabled");
     const forward_body_from_source = bodyFromDeviceSw.toggle.classList.contains("enabled");
+    const body_fields = sanitizeBodyRows();
+    setBodyBuilderError("");
+    if (!forward_body_from_source && body_fields.length === 0) {
+      setBodyBuilderError("Bitte mindestens ein Body-Feld konfigurieren.");
+      return;
+    }
     let headersObj = {};
     if (!incoming_headers_only) {
       const raw = headersField.input.value.trim();
@@ -1879,6 +2034,7 @@ function openForwardingModal(existing) {
             enabled,
             incoming_headers_only,
             forward_body_from_source,
+            body_fields,
           }),
         });
       } else {
@@ -1891,6 +2047,7 @@ function openForwardingModal(existing) {
             enabled,
             incoming_headers_only,
             forward_body_from_source,
+            body_fields,
           }),
         });
       }

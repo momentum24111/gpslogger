@@ -248,6 +248,51 @@ def build_replay_request(method: str, headers: dict, raw_body: str, captured_at:
     }
 
 
+def resolve_body_source_value(item: dict, source: str) -> str:
+    source_key = str(source or "").strip()
+    if source_key == "latitude":
+        v = item.get("latitude")
+    elif source_key == "longitude":
+        v = item.get("longitude")
+    elif source_key == "device_name":
+        v = item.get("device_name")
+    elif source_key == "accuracy":
+        v = item.get("accuracy")
+    elif source_key == "battery":
+        v = item.get("battery")
+    elif source_key == "speed":
+        v = item.get("speed")
+    elif source_key == "direction":
+        v = item.get("direction")
+    elif source_key == "altitude":
+        v = item.get("altitude")
+    elif source_key == "provider":
+        v = item.get("provider")
+    elif source_key == "activity":
+        v = item.get("activity")
+    elif source_key == "timestamp":
+        v = item.get("timestamp") or item.get("received_at")
+    elif source_key == "device_id":
+        v = item.get("device_id")
+    else:
+        v = None
+    return "" if v is None else str(v)
+
+
+def build_configured_forward_body(item: dict, body_fields: list[dict]) -> str:
+    pairs: list[tuple[str, str]] = []
+    for entry in body_fields:
+        if not isinstance(entry, dict):
+            continue
+        param = str(entry.get("param", "")).strip()
+        source = str(entry.get("source", "")).strip()
+        if not param or not source:
+            continue
+        value = resolve_body_source_value(item, source)
+        pairs.append((param, value))
+    return urlparse.urlencode(pairs)
+
+
 def build_test_forwarding_record(device: dict, status: dict) -> dict:
     timestamp = str(status.get("last_seen") or utc_now_iso())
     fields = {
@@ -346,8 +391,19 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
             if fwd.get("forward_body_from_source", True):
                 payload_bytes = str(source_body_text or "").encode("utf-8")
             else:
-                payload_bytes = b""
+                body_fields = fwd.get("body_fields")
+                if not isinstance(body_fields, list) or len(body_fields) == 0:
+                    attempt_detail["stage"] = "before_request"
+                    attempt_detail["request_sent"] = False
+                    attempt_detail["error"] = "Body-Konfiguration fehlt (body_fields leer)"
+                    attempt_detail["exception_type"] = "BodyConfigError"
+                    attempt_detail["replay_reason"] = "body_fields_missing"
+                    stats["failed"] += 1
+                    continue
+                configured_body = build_configured_forward_body(item, body_fields)
+                payload_bytes = configured_body.encode("utf-8")
                 attempt_detail["body_unchanged"] = False
+                attempt_detail["replay_reason"] = "configured_body_fields"
             method = attempt_detail["request_method"] or "POST"
             attempt_detail["stage"] = "request"
             req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method=method)
@@ -701,6 +757,8 @@ class Handler(BaseHTTPRequestHandler):
             incoming_headers_only = True if iho_raw is None else bool(iho_raw)
             fbs_raw = body.get("forward_body_from_source")
             forward_body_from_source = True if fbs_raw is None else bool(fbs_raw)
+            body_fields_raw = body.get("body_fields")
+            body_fields = body_fields_raw if isinstance(body_fields_raw, list) else []
             try:
                 forwarding = state.create_forwarding(
                     name,
@@ -709,6 +767,7 @@ class Handler(BaseHTTPRequestHandler):
                     enabled,
                     incoming_headers_only=incoming_headers_only,
                     forward_body_from_source=forward_body_from_source,
+                    body_fields=body_fields,
                 )
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
@@ -870,6 +929,8 @@ class Handler(BaseHTTPRequestHandler):
             incoming_headers_only = True if iho_raw is None else bool(iho_raw)
             fbs_raw = body.get("forward_body_from_source")
             forward_body_from_source = True if fbs_raw is None else bool(fbs_raw)
+            body_fields_raw = body.get("body_fields")
+            body_fields = body_fields_raw if isinstance(body_fields_raw, list) else []
             try:
                 updated = state.update_forwarding(
                     forward_id,
@@ -879,6 +940,7 @@ class Handler(BaseHTTPRequestHandler):
                     enabled,
                     incoming_headers_only=incoming_headers_only,
                     forward_body_from_source=forward_body_from_source,
+                    body_fields=body_fields,
                 )
             except ValueError as exc:
                 return json_response(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
