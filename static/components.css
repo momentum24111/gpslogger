@@ -839,7 +839,7 @@ main {
   box-shadow: var(--toast-shadow, none);
   pointer-events: auto;
   opacity: 0;
-  transform: translateY(-8px) scale(0.98);
+  transform: translateY(-6px);
   transition:
     opacity 0.22s ease,
     transform 0.22s ease;
@@ -847,12 +847,12 @@ main {
 
 .toast.is-visible {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateY(0);
 }
 
 .toast.is-leaving {
   opacity: 0;
-  transform: translateY(-8px) scale(0.98);
+  transform: translateY(0);
 }
 
 .toast::before {
@@ -908,6 +908,10 @@ main {
 
 .toast-close .material-symbols-outlined {
   font-size: 16px;
+}
+
+.toast-close:active {
+  box-shadow: none;
 }
 
 .toast--success {

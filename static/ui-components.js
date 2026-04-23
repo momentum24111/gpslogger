@@ -193,7 +193,11 @@ function drainToastQueue(area) {
       leaving: false,
     };
     state.visible.set(id, entry);
-    closeBtn?.addEventListener("click", () => removeToast(area, id));
+    closeBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeToast(area, id);
+    });
     area.appendChild(el);
     requestAnimationFrame(() => el.classList.add("is-visible"));
     entry.timer = window.setTimeout(() => removeToast(area, id), next.durationMs);
