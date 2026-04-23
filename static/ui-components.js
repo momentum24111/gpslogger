@@ -154,7 +154,7 @@ function createToastElement(toast) {
       <div class="toast-title">${escapeHtml(titleText)}</div>
       <div class="toast-description">${escapeHtml(toast.description)}</div>
     </div>
-    <button class="toast-close icon-btn" type="button" aria-label="Toast schließen">
+    <button class="toast-close icon-btn" type="button" aria-label="Toast schließen" data-ripple="off">
       <span class="material-symbols-outlined" aria-hidden="true">close</span>
     </button>
   `;

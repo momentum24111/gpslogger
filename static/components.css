@@ -914,6 +914,15 @@ main {
   box-shadow: none;
 }
 
+.toast-close.ui-ripple-host {
+  overflow: visible;
+  isolation: auto;
+}
+
+.toast-close.ui-ripple-host > :not(.ui-ripple-wave) {
+  position: static;
+}
+
 .toast--success {
   --toast-accent: var(--color-success);
 }

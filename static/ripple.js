@@ -23,6 +23,8 @@ function findRippleTarget(node) {
 
 function isRippleDisabled(el) {
   if (!(el instanceof HTMLElement)) return true;
+  if (el.getAttribute("data-ripple") === "off") return true;
+  if (el.classList.contains("toast-close")) return true;
   try {
     if (el.matches(":disabled")) return true;
   } catch (_e) {
