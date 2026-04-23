@@ -36,6 +36,12 @@ HOP_BY_HOP_HEADERS = {
     "host",
     "content-length",
 }
+REPLAY_HEADER_ALLOWLIST = {
+    "content-type",
+    "authorization",
+    "user-agent",
+    "accept",
+}
 
 RESTART_WEBHOOK_URL = "http://127.0.0.1:9000/"
 
@@ -188,6 +194,17 @@ def sanitize_forward_headers(headers: dict) -> dict:
     return cleaned
 
 
+def select_replay_headers(headers: dict) -> dict:
+    """Sichere Replay-Header-Auswahl ohne Transport-Artefakte."""
+    cleaned = sanitize_forward_headers(headers or {})
+    selected: dict[str, str] = {}
+    for key, value in cleaned.items():
+        lower_key = key.lower()
+        if lower_key in REPLAY_HEADER_ALLOWLIST or lower_key.startswith("x-"):
+            selected[key] = value
+    return selected
+
+
 def lookup_header_ci(headers: dict, names: tuple[str, ...]) -> str | None:
     lower_map = {str(k).lower(): v for k, v in headers.items()}
     for name in names:
@@ -218,6 +235,19 @@ def build_outgoing_forward_headers(fwd: dict, source_headers: dict) -> dict:
     return headers
 
 
+def build_replay_request(method: str, headers: dict, raw_body: str, captured_at: str) -> dict:
+    replay_headers = select_replay_headers(headers)
+    content_type = lookup_header_ci(replay_headers, ("content-type",)) or "application/x-www-form-urlencoded"
+    return {
+        "method": str(method or "POST").upper(),
+        "headers": replay_headers,
+        "content_type": content_type,
+        "body": str(raw_body or ""),
+        "captured_at": str(captured_at or utc_now_iso()),
+        "body_unchanged": True,
+    }
+
+
 def build_test_forwarding_record(device: dict, status: dict) -> dict:
     timestamp = str(status.get("last_seen") or utc_now_iso())
     fields = {
@@ -241,6 +271,12 @@ def build_test_forwarding_record(device: dict, status: dict) -> dict:
     if status.get("device") is not None:
         fields["device"] = status.get("device")
     raw_body = urlparse.urlencode({k: "" if v is None else str(v) for k, v in fields.items()})
+    replay = build_replay_request(
+        "POST",
+        {"Content-Type": "application/x-www-form-urlencoded", "X-GPSLogger-Test": "1"},
+        raw_body,
+        utc_now_iso(),
+    )
     return {
         "device_id": device.get("id"),
         "device_name": device.get("name"),
@@ -254,6 +290,7 @@ def build_test_forwarding_record(device: dict, status: dict) -> dict:
             "X-GPSLogger-Test": "1",
         },
         "raw_body": raw_body,
+        "replay_request": replay,
         "received_at": utc_now_iso(),
     }
 
@@ -268,8 +305,14 @@ def is_http_url(value: str) -> bool:
 
 def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_disabled: bool = False) -> dict:
     stats = {"attempted": 0, "delivered": 0, "failed": 0, "attempts": []}
+    replay_request = item.get("replay_request") if isinstance(item.get("replay_request"), dict) else None
     raw_in_headers = item.get("headers") or {}
     raw_body_text = item.get("raw_body", "") or ""
+    replay_available = replay_request is not None
+    source_headers = replay_request.get("headers", {}) if replay_available else raw_in_headers
+    source_body_text = replay_request.get("body", "") if replay_available else raw_body_text
+    source_method = replay_request.get("method", "POST") if replay_available else "POST"
+    source_content_type = replay_request.get("content_type", "") if replay_available else lookup_header_ci(raw_in_headers, ("content-type",))
     for fwd in forwardings:
         if not isinstance(fwd, dict):
             continue
@@ -290,16 +333,24 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
             "error": "",
             "exception_type": "",
             "response_excerpt": "",
+            "replay_available": replay_available,
+            "replay_used": replay_available,
+            "request_method": str(source_method or "POST").upper(),
+            "request_content_type": str(source_content_type or ""),
+            "body_unchanged": bool(replay_request.get("body_unchanged", False)) if replay_available else False,
+            "replay_reason": "captured_from_original_request" if replay_available else "missing_replay_request_fallback_to_legacy_fields",
         }
         stats["attempts"].append(attempt_detail)
         try:
-            headers = build_outgoing_forward_headers(fwd, raw_in_headers)
+            headers = build_outgoing_forward_headers(fwd, source_headers)
             if fwd.get("forward_body_from_source", True):
-                payload_bytes = raw_body_text.encode("utf-8")
+                payload_bytes = str(source_body_text or "").encode("utf-8")
             else:
                 payload_bytes = b""
+                attempt_detail["body_unchanged"] = False
+            method = attempt_detail["request_method"] or "POST"
             attempt_detail["stage"] = "request"
-            req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
+            req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method=method)
             with urlrequest.urlopen(req, timeout=6) as resp:
                 attempt_detail["request_sent"] = True
                 attempt_detail["http_status"] = int(getattr(resp, "status", 200))
@@ -450,6 +501,7 @@ class Handler(BaseHTTPRequestHandler):
                 normalized_timestamp = utc_now_iso()
 
         headers_dict = {k: v for k, v in self.headers.items()}
+        received_at = utc_now_iso()
         record = {
             "device_id": device["id"],
             "device_name": device["name"],
@@ -461,7 +513,8 @@ class Handler(BaseHTTPRequestHandler):
             "extra_fields": fields,
             "raw_body": raw_body,
             "headers": headers_dict,
-            "received_at": utc_now_iso(),
+            "replay_request": build_replay_request(self.command, headers_dict, raw_body, received_at),
+            "received_at": received_at,
         }
         if ingest_route == "/api/current-location":
             record["device"] = optional_form_str(fields, "device")
@@ -711,10 +764,28 @@ class Handler(BaseHTTPRequestHandler):
                 record = latest_requests.get(device_id)
                 if record is None:
                     record = build_test_forwarding_record(device, st)
+                    replay_mode = "normalized_fallback"
+                    replay_reason = "no_stored_request_for_device"
                 else:
                     record = dict(record)
-                    record["headers"] = dict(record.get("headers") or {})
-                    record["headers"]["X-GPSLogger-Test"] = "1"
+                    replay_mode = "stored_replay"
+                    replay_reason = ""
+                    replay = record.get("replay_request") if isinstance(record.get("replay_request"), dict) else None
+                    if replay is None:
+                        replay_reason = "stored_request_has_no_replay_request"
+                        replay = build_replay_request(
+                            "POST",
+                            dict(record.get("headers") or {}),
+                            str(record.get("raw_body") or ""),
+                            str(record.get("received_at") or utc_now_iso()),
+                        )
+                        replay_mode = "legacy_stored_request_fallback"
+                    replay = dict(replay)
+                    replay_headers = dict(replay.get("headers") or {})
+                    replay_headers["X-GPSLogger-Test"] = "1"
+                    replay["headers"] = replay_headers
+                    replay["body_unchanged"] = True
+                    record["replay_request"] = replay
                 row = forward_record_to_forwardings(record, [selected], allow_disabled=True)
                 attempted += int(row.get("attempted", 0))
                 delivered += int(row.get("delivered", 0))
@@ -723,7 +794,9 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "device_id": device_id,
                         "device_name": device.get("name"),
-                        "used_source": "latest_request" if device_id in latest_requests else "status_fallback",
+                        "used_source": replay_mode,
+                        "replay_available": replay_mode != "normalized_fallback",
+                        "replay_reason": replay_reason,
                         "attempts": row.get("attempts") or [],
                     }
                 )

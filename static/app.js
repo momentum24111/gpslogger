@@ -1665,7 +1665,13 @@ function renderForwardingTestResult() {
           const stage = entry.stage || "unbekannt";
           const err = entry.error ? escapeHtml(entry.error) : "—";
           const excerpt = entry.response_excerpt ? `<small>Antwort: ${escapeHtml(entry.response_excerpt)}</small>` : "";
-          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · Phase: ${escapeHtml(stage)} · Request gesendet: ${entry.request_sent ? "ja" : "nein"} · Quelle: ${escapeHtml(entry.used_source)}</small><small>Ziel: ${escapeHtml(entry.target_url || "—")}</small><small>Fehler: ${err}</small>${excerpt}</div>`;
+          const method = escapeHtml(entry.request_method || "POST");
+          const contentType = escapeHtml(entry.request_content_type || "—");
+          const replayFlag = entry.replay_available ? "ja" : "nein";
+          const replayUsed = entry.replay_used ? "ja" : "nein";
+          const bodyUnchanged = entry.body_unchanged ? "ja" : "nein";
+          const replayReason = entry.replay_reason ? `<small>Replay-Hinweis: ${escapeHtml(entry.replay_reason)}</small>` : "";
+          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · Phase: ${escapeHtml(stage)} · Request gesendet: ${entry.request_sent ? "ja" : "nein"} · Quelle: ${escapeHtml(entry.used_source)}</small><small>Ziel: ${escapeHtml(entry.target_url || "—")}</small><small>Methode: ${method} · Content-Type: ${contentType}</small><small>Replay vorhanden: ${replayFlag} · Replay verwendet: ${replayUsed} · Body unverändert: ${bodyUnchanged}</small><small>Fehler: ${err}</small>${replayReason}${excerpt}</div>`;
         })
         .join("")
     : `<div class="forwarding-test-row"><small>Keine Versuche ausgeführt.</small></div>`;
@@ -1674,6 +1680,9 @@ function renderForwardingTestResult() {
         .map((row) => `<span>${escapeHtml(row.device_name || row.device_id || "Unbekannt")}</span>`)
         .join(", ")
     : "Keine";
+  const replayMissingRows = (result.device_runs || [])
+    .filter((row) => !row.replay_available)
+    .map((row) => `${row.device_name || row.device_id || "Unbekannt"}${row.replay_reason ? ` (${row.replay_reason})` : ""}`);
   host.innerHTML = `
     <div class="forwarding-test-head">
       <strong>Letzter Testlauf: ${escapeHtml(result.forwarding_name || "Weiterleitung")}</strong>
@@ -1684,6 +1693,7 @@ function renderForwardingTestResult() {
       <small>Geräte gesamt: ${Number(result.devices_total || 0)}</small>
       <small>Mit letzter Position: ${Number(result.devices_with_position || 0)}</small>
       <small>Ohne letzte Position: ${escapeHtml(skippedRows)}</small>
+      <small>Ohne Replay-Request: ${escapeHtml(replayMissingRows.length ? replayMissingRows.join(", ") : "Keine")}</small>
       <small>Versuche: ${Number(result.requests_attempted || 0)} · Erfolgreich: ${Number(result.requests_delivered || 0)} · Fehlgeschlagen: ${Number(result.requests_failed || 0)}</small>
     </div>
     <div class="forwarding-test-list">${attemptRows}</div>
