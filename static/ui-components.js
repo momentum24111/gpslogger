@@ -102,6 +102,14 @@ const TOAST_VARIANTS = {
   },
 };
 
+function escapeHtml(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function getToastState(area) {
   if (!area.__toastState) {
     area.__toastState = {
@@ -141,10 +149,10 @@ function createToastElement(toast) {
   const iconName = toast.icon || variant.icon;
   const titleText = toast.title || variant.title;
   item.innerHTML = `
-    <div class="toast-icon" aria-hidden="true"><span class="material-symbols-outlined">${iconName}</span></div>
+    <div class="toast-icon" aria-hidden="true"><span class="material-symbols-outlined">${escapeHtml(iconName)}</span></div>
     <div class="toast-content">
-      <div class="toast-title">${titleText}</div>
-      <div class="toast-description">${toast.description}</div>
+      <div class="toast-title">${escapeHtml(titleText)}</div>
+      <div class="toast-description">${escapeHtml(toast.description)}</div>
     </div>
     <button class="toast-close icon-btn" type="button" aria-label="Toast schließen">
       <span class="material-symbols-outlined" aria-hidden="true">close</span>

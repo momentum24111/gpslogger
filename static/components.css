@@ -702,22 +702,24 @@ main {
 
 .toast-area {
   position: fixed;
-  top: var(--toast-top, 1rem);
+  top: max(var(--toast-top, 1rem), env(safe-area-inset-top, 0px));
   right: var(--toast-right, 1rem);
   display: grid;
   gap: var(--toast-gap, var(--spacing-sm));
-  z-index: 1200;
+  z-index: 5000;
   width: min(var(--toast-width), calc(100vw - 2rem));
   pointer-events: none;
 }
 
 .toast {
+  position: relative;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: var(--spacing-sm);
+  column-gap: var(--spacing-md);
   width: 100%;
-  padding: var(--spacing-md);
+  padding: var(--spacing-md) calc(var(--spacing-md) + 2rem) var(--spacing-md) calc(var(--spacing-md) + var(--toast-accent-width, 4px));
   border-radius: var(--radius-md);
   background: var(--toast-bg, var(--color-surface));
   border: 1px solid var(--toast-border, var(--color-border));
@@ -742,9 +744,12 @@ main {
 
 .toast::before {
   content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
   width: var(--toast-accent-width, 4px);
-  border-radius: 999px;
-  align-self: stretch;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
   background: var(--toast-accent, var(--color-primary));
 }
 
@@ -753,7 +758,7 @@ main {
   align-items: center;
   justify-content: center;
   color: var(--toast-icon-fg, var(--toast-fg, var(--color-text)));
-  margin-top: 1px;
+  margin-top: 0.1rem;
 }
 
 .toast-icon .material-symbols-outlined {
@@ -772,16 +777,20 @@ main {
 }
 
 .toast-description {
-  margin-top: 0.1rem;
+  margin-top: 0.2rem;
   font-size: 0.8125rem;
   line-height: 1.35;
   color: var(--toast-content-fg, var(--toast-fg, var(--color-text)));
 }
 
 .toast-close {
-  width: 1.75rem;
-  height: 1.75rem;
-  min-height: 1.75rem;
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  min-height: 1.6rem;
+  border-radius: 999px;
 }
 
 .toast-close .material-symbols-outlined {
@@ -798,6 +807,48 @@ main {
 
 .toast--info {
   --toast-accent: var(--color-primary);
+}
+
+.forwarding-test-result {
+  display: grid;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  background: var(--forwarding-test-bg, var(--list-item-bg, var(--color-surface-elevated)));
+  border: 1px solid var(--forwarding-test-border, var(--color-border));
+}
+
+.forwarding-test-head {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.forwarding-test-head small,
+.forwarding-test-summary small {
+  color: var(--forwarding-test-muted-fg, var(--color-text-muted));
+}
+
+.forwarding-test-summary {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.forwarding-test-list {
+  display: grid;
+  gap: var(--spacing-xs);
+}
+
+.forwarding-test-row {
+  display: grid;
+  gap: 0.12rem;
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  background: var(--forwarding-test-row-bg, var(--color-surface-elevated));
+}
+
+.forwarding-test-row small {
+  color: var(--forwarding-test-row-muted-fg, var(--color-text-muted));
+  word-break: break-word;
 }
 
 .modal-overlay {

@@ -670,3 +670,25 @@ class AppState:
                 return []
             return rows[-limit:]
 
+    def get_latest_gps_requests_by_device(self) -> dict[str, dict[str, Any]]:
+        """Letzten gespeicherten GPS-Request je Gerät (inkl. raw_body/headers)."""
+        with self._lock:
+            if not self.gps_path.exists():
+                return {}
+            latest: dict[str, dict[str, Any]] = {}
+            with self.gps_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    device_id = str(item.get("device_id", "")).strip()
+                    if not device_id:
+                        continue
+                    if self._position_row_from_stored(item) is None:
+                        continue
+                    latest[device_id] = item
+            return latest
+

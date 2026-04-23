@@ -98,6 +98,11 @@
   --toast-top: 1rem;
   --toast-right: 1rem;
   --toast-gap: 0.5rem;
+  --forwarding-test-bg: var(--color-surface-elevated);
+  --forwarding-test-border: var(--color-border);
+  --forwarding-test-muted-fg: var(--color-text-muted);
+  --forwarding-test-row-bg: color-mix(in srgb, var(--color-surface-elevated) 86%, var(--color-bg));
+  --forwarding-test-row-muted-fg: var(--color-text-muted);
 
   --control-bg: var(--color-surface-elevated);
   --control-border: var(--color-border);

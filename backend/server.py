@@ -1,4 +1,5 @@
 import json
+import socket
 import queue
 import threading
 import time
@@ -7,6 +8,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import parse as urlparse
+from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from .openapi_spec import build_openapi_spec
@@ -265,7 +267,7 @@ def is_http_url(value: str) -> bool:
 
 
 def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_disabled: bool = False) -> dict:
-    stats = {"attempted": 0, "delivered": 0, "failed": 0}
+    stats = {"attempted": 0, "delivered": 0, "failed": 0, "attempts": []}
     raw_in_headers = item.get("headers") or {}
     raw_body_text = item.get("raw_body", "") or ""
     for fwd in forwardings:
@@ -277,17 +279,63 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
         if not url or not is_http_url(url):
             continue
         stats["attempted"] += 1
-        headers = build_outgoing_forward_headers(fwd, raw_in_headers)
-        if fwd.get("forward_body_from_source", True):
-            payload_bytes = raw_body_text.encode("utf-8")
-        else:
-            payload_bytes = b""
+        attempt_detail = {
+            "forwarding_id": str(fwd.get("id", "")),
+            "forwarding_name": str(fwd.get("name", "")).strip() or "Weiterleitung",
+            "target_url": url,
+            "stage": "before_request",
+            "request_sent": False,
+            "ok": False,
+            "http_status": None,
+            "error": "",
+            "exception_type": "",
+            "response_excerpt": "",
+        }
+        stats["attempts"].append(attempt_detail)
         try:
+            headers = build_outgoing_forward_headers(fwd, raw_in_headers)
+            if fwd.get("forward_body_from_source", True):
+                payload_bytes = raw_body_text.encode("utf-8")
+            else:
+                payload_bytes = b""
+            attempt_detail["stage"] = "request"
             req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method="POST")
-            with urlrequest.urlopen(req, timeout=6):
+            with urlrequest.urlopen(req, timeout=6) as resp:
+                attempt_detail["request_sent"] = True
+                attempt_detail["http_status"] = int(getattr(resp, "status", 200))
+                attempt_detail["stage"] = "response"
                 pass
+            attempt_detail["ok"] = True
             stats["delivered"] += 1
+        except urlerror.HTTPError as exc:
+            attempt_detail["stage"] = "response"
+            attempt_detail["request_sent"] = True
+            attempt_detail["http_status"] = int(getattr(exc, "code", 0) or 0)
+            attempt_detail["error"] = str(exc)
+            attempt_detail["exception_type"] = exc.__class__.__name__
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+                attempt_detail["response_excerpt"] = body[:300]
+            except Exception:
+                attempt_detail["response_excerpt"] = ""
+            stats["failed"] += 1
+            label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
+            print(f"[forwarding] error ({label}): {exc}")
+            state.append_forwarding_error(f"{label}: HTTP {attempt_detail['http_status']} {exc}")
+        except (urlerror.URLError, TimeoutError, socket.timeout) as exc:
+            attempt_detail["stage"] = "request"
+            attempt_detail["request_sent"] = False
+            attempt_detail["error"] = str(exc)
+            attempt_detail["exception_type"] = exc.__class__.__name__
+            stats["failed"] += 1
+            label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
+            print(f"[forwarding] error ({label}): {exc}")
+            state.append_forwarding_error(f"{label}: {exc}")
         except Exception as exc:
+            attempt_detail["stage"] = "evaluation"
+            attempt_detail["request_sent"] = False
+            attempt_detail["error"] = str(exc)
+            attempt_detail["exception_type"] = exc.__class__.__name__
             stats["failed"] += 1
             label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
             print(f"[forwarding] error ({label}): {exc}")
@@ -624,34 +672,74 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, {"error": "Weiterleitung nicht gefunden"}, HTTPStatus.NOT_FOUND)
             devices = state.list_devices()
             statuses = state.get_device_statuses()
+            latest_requests = state.get_latest_gps_requests_by_device()
             if not devices:
                 return json_response(
                     self,
-                    {"ok": True, "result": {"devices_total": 0, "devices_with_position": 0, "requests_attempted": 0, "requests_delivered": 0, "requests_failed": 0}},
+                    {
+                        "ok": True,
+                        "result": {
+                            "forwarding_id": selected.get("id"),
+                            "forwarding_name": selected.get("name"),
+                            "target_url": selected.get("url"),
+                            "server_side_request": True,
+                            "devices_total": 0,
+                            "devices_with_position": 0,
+                            "devices_without_position": [],
+                            "device_runs": [],
+                            "requests_attempted": 0,
+                            "requests_delivered": 0,
+                            "requests_failed": 0,
+                        },
+                    },
                 )
             total_with_position = 0
             attempted = 0
             delivered = 0
             failed = 0
+            devices_without_position: list[dict] = []
+            device_runs: list[dict] = []
             for device in devices:
-                st = statuses.get(device.get("id")) or {}
+                device_id = str(device.get("id") or "")
+                st = statuses.get(device_id) or {}
                 lat = st.get("latitude")
                 lon = st.get("longitude")
                 if lat is None or lon is None:
+                    devices_without_position.append({"device_id": device_id, "device_name": device.get("name")})
                     continue
                 total_with_position += 1
-                record = build_test_forwarding_record(device, st)
+                record = latest_requests.get(device_id)
+                if record is None:
+                    record = build_test_forwarding_record(device, st)
+                else:
+                    record = dict(record)
+                    record["headers"] = dict(record.get("headers") or {})
+                    record["headers"]["X-GPSLogger-Test"] = "1"
                 row = forward_record_to_forwardings(record, [selected], allow_disabled=True)
                 attempted += int(row.get("attempted", 0))
                 delivered += int(row.get("delivered", 0))
                 failed += int(row.get("failed", 0))
+                device_runs.append(
+                    {
+                        "device_id": device_id,
+                        "device_name": device.get("name"),
+                        "used_source": "latest_request" if device_id in latest_requests else "status_fallback",
+                        "attempts": row.get("attempts") or [],
+                    }
+                )
             return json_response(
                 self,
                 {
                     "ok": True,
                     "result": {
+                        "forwarding_id": selected.get("id"),
+                        "forwarding_name": selected.get("name"),
+                        "target_url": selected.get("url"),
+                        "server_side_request": True,
                         "devices_total": len(devices),
                         "devices_with_position": total_with_position,
+                        "devices_without_position": devices_without_position,
+                        "device_runs": device_runs,
                         "requests_attempted": attempted,
                         "requests_delivered": delivered,
                         "requests_failed": failed,

@@ -91,6 +91,7 @@ const state = {
   recentGps: [],
   themes: [],
   visibleDeviceIds: new Set(),
+  lastForwardingTestResult: null,
 };
 
 /** Verhindert parallele Neustart-Workflows (Button / Modal). */
@@ -1522,6 +1523,7 @@ function buildSettingsPage() {
         </div>
         <div id="settings-forwarding" class="settings-forwarding-block">
           <div id="forwardings-list" class="list ui-list"></div>
+          <div id="forwarding-test-result" class="forwarding-test-result" hidden></div>
         </div>
       </section>
       <section class="settings-section">
@@ -1631,6 +1633,62 @@ function buildSettingsPage() {
   ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, saveBtn };
   ui.settingsDirty = false;
   renderDevicesSection();
+}
+
+function renderForwardingTestResult() {
+  const host = document.getElementById("forwarding-test-result");
+  if (!host) return;
+  const result = state.lastForwardingTestResult;
+  if (!result) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  const attempts = [];
+  (result.device_runs || []).forEach((run) => {
+    (run.attempts || []).forEach((attempt) => {
+      attempts.push({
+        device_name: run.device_name || run.device_id || "Unbekannt",
+        used_source: run.used_source || "",
+        ...attempt,
+      });
+    });
+  });
+  const attemptRows = attempts.length
+    ? attempts
+        .map((entry) => {
+          const statusText = entry.ok
+            ? `OK (${entry.http_status || "HTTP"})`
+            : entry.http_status
+              ? `Fehler (HTTP ${entry.http_status})`
+              : "Fehler";
+          const stage = entry.stage || "unbekannt";
+          const err = entry.error ? escapeHtml(entry.error) : "—";
+          const excerpt = entry.response_excerpt ? `<small>Antwort: ${escapeHtml(entry.response_excerpt)}</small>` : "";
+          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · Phase: ${escapeHtml(stage)} · Request gesendet: ${entry.request_sent ? "ja" : "nein"} · Quelle: ${escapeHtml(entry.used_source)}</small><small>Ziel: ${escapeHtml(entry.target_url || "—")}</small><small>Fehler: ${err}</small>${excerpt}</div>`;
+        })
+        .join("")
+    : `<div class="forwarding-test-row"><small>Keine Versuche ausgeführt.</small></div>`;
+  const skippedRows = (result.devices_without_position || []).length
+    ? result.devices_without_position
+        .map((row) => `<span>${escapeHtml(row.device_name || row.device_id || "Unbekannt")}</span>`)
+        .join(", ")
+    : "Keine";
+  host.innerHTML = `
+    <div class="forwarding-test-head">
+      <strong>Letzter Testlauf: ${escapeHtml(result.forwarding_name || "Weiterleitung")}</strong>
+      <small>Ziel-URL: ${escapeHtml(result.target_url || "—")}</small>
+      <small>Hinweis: Zielrequest wird serverseitig ausgeführt und ist im Browser-Netzwerk nicht direkt sichtbar.</small>
+    </div>
+    <div class="forwarding-test-summary">
+      <small>Geräte gesamt: ${Number(result.devices_total || 0)}</small>
+      <small>Mit letzter Position: ${Number(result.devices_with_position || 0)}</small>
+      <small>Ohne letzte Position: ${escapeHtml(skippedRows)}</small>
+      <small>Versuche: ${Number(result.requests_attempted || 0)} · Erfolgreich: ${Number(result.requests_delivered || 0)} · Fehlgeschlagen: ${Number(result.requests_failed || 0)}</small>
+    </div>
+    <div class="forwarding-test-list">${attemptRows}</div>
+  `;
+  host.hidden = false;
 }
 
 async function openStatusModal() {
@@ -1910,6 +1968,7 @@ function renderForwardingList() {
     item.append(leading, body, actions);
     host.appendChild(item);
   });
+  renderForwardingTestResult();
 }
 
 async function runForwardingTest(forwarding, triggerBtn = null) {
@@ -1923,13 +1982,18 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
       body: JSON.stringify({}),
     });
     const result = res.result || {};
+    state.lastForwardingTestResult = result;
+    renderForwardingTestResult();
     const devicesTotal = Number(result.devices_total || 0);
     const withPosition = Number(result.devices_with_position || 0);
     const delivered = Number(result.requests_delivered || 0);
     const failed = Number(result.requests_failed || 0);
+    const firstFailure = (result.device_runs || [])
+      .flatMap((run) => run.attempts || [])
+      .find((attempt) => !attempt.ok);
     if (devicesTotal === 0) {
       pushToast(ui.toastArea, {
-        level: "error",
+        level: "info",
         title: "Kein Test durchgeführt",
         description: "Es sind keine Geräte vorhanden.",
       });
@@ -1937,7 +2001,7 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
     }
     if (withPosition === 0) {
       pushToast(ui.toastArea, {
-        level: "error",
+        level: "info",
         title: "Kein Test durchgeführt",
         description: "Kein Gerät hat eine letzte Position.",
       });
@@ -1947,24 +2011,31 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
       pushToast(ui.toastArea, {
         level: "success",
         title: "Weiterleitung getestet",
-        description: `${delivered} Test-Request(s) für "${forwarding.name}" erfolgreich gesendet.`,
+        description: `Test erfolgreich, ${delivered} Request(s) zugestellt.`,
       });
       return;
     }
     if (delivered > 0 && failed > 0) {
       pushToast(ui.toastArea, {
-        level: "error",
+        level: "info",
         title: "Test teilweise fehlgeschlagen",
-        description: `${delivered} erfolgreich, ${failed} fehlgeschlagen.`,
+        description: `${delivered} von ${delivered + failed} Requests zugestellt.`,
       });
       return;
     }
+    const failureMsg = firstFailure?.http_status
+      ? `Test fehlgeschlagen, HTTP ${firstFailure.http_status} von Zielsystem.`
+      : firstFailure?.error
+        ? `Test fehlgeschlagen, ${firstFailure.error}`
+        : "Test fehlgeschlagen, Ziel nicht erreichbar.";
     pushToast(ui.toastArea, {
       level: "error",
       title: "Test fehlgeschlagen",
-      description: `Für "${forwarding.name}" konnte kein Test-Request zugestellt werden.`,
+      description: failureMsg,
     });
   } catch (err) {
+    state.lastForwardingTestResult = null;
+    renderForwardingTestResult();
     pushToast(ui.toastArea, {
       level: "error",
       title: "Test fehlgeschlagen",
