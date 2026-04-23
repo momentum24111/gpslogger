@@ -17,6 +17,7 @@ FORWARDING_BODY_SOURCES = {
     "latitude",
     "longitude",
     "device_name",
+    "request_device",
     "accuracy",
     "battery",
     "speed",

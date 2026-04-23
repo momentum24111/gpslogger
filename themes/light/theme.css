@@ -107,6 +107,10 @@
   --forwarding-body-preview-border: var(--color-border);
   --forwarding-body-preview-fg: var(--color-text);
   --forwarding-body-builder-error-fg: var(--color-error);
+  --forwarding-header-preview-bg: color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-bg));
+  --forwarding-header-preview-border: var(--color-border);
+  --forwarding-header-preview-fg: var(--color-text);
+  --forwarding-header-builder-error-fg: var(--color-error);
 
   --control-bg: #ffffff;
   --control-border: #c4cad8;

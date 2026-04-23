@@ -36,12 +36,15 @@ HOP_BY_HOP_HEADERS = {
     "host",
     "content-length",
 }
-REPLAY_HEADER_ALLOWLIST = {
-    "content-type",
-    "authorization",
-    "user-agent",
-    "accept",
+INTERNAL_HEADER_BLOCKLIST = {
+    "x-gpslogger-test",
 }
+INTERNAL_HEADER_PREFIX_BLOCKLIST = (
+    "x-forwarded-",
+    "forwarded",
+    "x-real-ip",
+    "x-proxy-",
+)
 
 RESTART_WEBHOOK_URL = "http://127.0.0.1:9000/"
 
@@ -195,13 +198,16 @@ def sanitize_forward_headers(headers: dict) -> dict:
 
 
 def select_replay_headers(headers: dict) -> dict:
-    """Sichere Replay-Header-Auswahl ohne Transport-Artefakte."""
+    """Geräte-Header übernehmen, aber interne/proxy Header strikt entfernen."""
     cleaned = sanitize_forward_headers(headers or {})
     selected: dict[str, str] = {}
     for key, value in cleaned.items():
         lower_key = key.lower()
-        if lower_key in REPLAY_HEADER_ALLOWLIST or lower_key.startswith("x-"):
-            selected[key] = value
+        if lower_key in INTERNAL_HEADER_BLOCKLIST:
+            continue
+        if any(lower_key.startswith(prefix) for prefix in INTERNAL_HEADER_PREFIX_BLOCKLIST):
+            continue
+        selected[key] = value
     return selected
 
 
@@ -256,6 +262,8 @@ def resolve_body_source_value(item: dict, source: str) -> str:
         v = item.get("longitude")
     elif source_key == "device_name":
         v = item.get("device_name")
+    elif source_key == "request_device":
+        v = item.get("request_device")
     elif source_key == "accuracy":
         v = item.get("accuracy")
     elif source_key == "battery":
@@ -318,7 +326,7 @@ def build_test_forwarding_record(device: dict, status: dict) -> dict:
     raw_body = urlparse.urlencode({k: "" if v is None else str(v) for k, v in fields.items()})
     replay = build_replay_request(
         "POST",
-        {"Content-Type": "application/x-www-form-urlencoded", "X-GPSLogger-Test": "1"},
+        {"Content-Type": "application/x-www-form-urlencoded"},
         raw_body,
         utc_now_iso(),
     )
@@ -332,7 +340,6 @@ def build_test_forwarding_record(device: dict, status: dict) -> dict:
         "ingest_route": "/api/forwarding-test",
         "headers": {
             "Content-Type": "application/x-www-form-urlencoded",
-            "X-GPSLogger-Test": "1",
         },
         "raw_body": raw_body,
         "replay_request": replay,
@@ -358,6 +365,8 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
     source_body_text = replay_request.get("body", "") if replay_available else raw_body_text
     source_method = replay_request.get("method", "POST") if replay_available else "POST"
     source_content_type = replay_request.get("content_type", "") if replay_available else lookup_header_ci(raw_in_headers, ("content-type",))
+    original_request_device = str(item.get("request_device") or "")
+    device_display_name = str(item.get("device_name") or "")
     for fwd in forwardings:
         if not isinstance(fwd, dict):
             continue
@@ -384,6 +393,11 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
             "request_content_type": str(source_content_type or ""),
             "body_unchanged": bool(replay_request.get("body_unchanged", False)) if replay_available else False,
             "replay_reason": "captured_from_original_request" if replay_available else "missing_replay_request_fallback_to_legacy_fields",
+            "body_source": "replay_original" if replay_available else "legacy_fallback",
+            "header_source": "incoming" if bool(fwd.get("incoming_headers_only", True)) else "builder",
+            "original_request_device": original_request_device,
+            "device_display_name": device_display_name,
+            "sent_device_value": "",
             "final_request_method": "",
             "final_request_url": "",
             "final_request_headers": {},
@@ -410,6 +424,7 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
                 payload_bytes = configured_body.encode("utf-8")
                 attempt_detail["body_unchanged"] = False
                 attempt_detail["replay_reason"] = "configured_body_fields"
+                attempt_detail["body_source"] = "configured_body_fields"
             method = attempt_detail["request_method"] or "POST"
             final_body_text = payload_bytes.decode("utf-8", errors="replace")
             attempt_detail["stage"] = "request"
@@ -418,6 +433,10 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
             attempt_detail["final_request_url"] = url
             attempt_detail["final_request_headers"] = {k: v for k, v in req.header_items()}
             attempt_detail["final_request_body_text"] = final_body_text
+            parsed_final = urlparse.parse_qs(final_body_text, keep_blank_values=True)
+            device_param_values = parsed_final.get("device")
+            if isinstance(device_param_values, list) and device_param_values:
+                attempt_detail["sent_device_value"] = str(device_param_values[-1])
             with urlrequest.urlopen(req, timeout=6) as resp:
                 attempt_detail["request_sent"] = True
                 attempt_detail["http_status"] = int(getattr(resp, "status", 200))
@@ -578,6 +597,7 @@ class Handler(BaseHTTPRequestHandler):
         record = {
             "device_id": device["id"],
             "device_name": device["name"],
+            "request_device": optional_form_str(fields, "device"),
             "latitude": lat,
             "longitude": lon,
             "accuracy": normalized_accuracy,
@@ -857,9 +877,7 @@ class Handler(BaseHTTPRequestHandler):
                         )
                         replay_mode = "legacy_stored_request_fallback"
                     replay = dict(replay)
-                    replay_headers = dict(replay.get("headers") or {})
-                    replay_headers["X-GPSLogger-Test"] = "1"
-                    replay["headers"] = replay_headers
+                    replay["headers"] = select_replay_headers(dict(replay.get("headers") or {}))
                     replay["body_unchanged"] = True
                     record["replay_request"] = replay
                 row = forward_record_to_forwardings(record, [selected], allow_disabled=True)

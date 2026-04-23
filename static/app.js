@@ -84,7 +84,8 @@ const SETTINGS_HASH = "#settings";
 const FORWARDING_BODY_VARIABLES = [
   { key: "latitude", label: "Latitude" },
   { key: "longitude", label: "Longitude" },
-  { key: "device_name", label: "Gerätename" },
+  { key: "request_device", label: "Originalwert Requestfeld device" },
+  { key: "device_name", label: "Geräte-Anzeigename" },
   { key: "accuracy", label: "Accuracy" },
   { key: "battery", label: "Battery" },
   { key: "speed", label: "Speed" },
@@ -1684,8 +1685,13 @@ function renderForwardingTestResult() {
           const replayFlag = entry.replay_available ? "ja" : "nein";
           const replayUsed = entry.replay_used ? "ja" : "nein";
           const bodyUnchanged = entry.body_unchanged ? "ja" : "nein";
+          const bodySource = escapeHtml(entry.body_source || "unbekannt");
+          const headerSource = escapeHtml(entry.header_source || "unbekannt");
+          const originalRequestDevice = escapeHtml(entry.original_request_device || "—");
+          const displayDeviceName = escapeHtml(entry.device_display_name || "—");
+          const sentDeviceValue = escapeHtml(entry.sent_device_value || "—");
           const replayReason = entry.replay_reason ? `<small>Replay-Hinweis: ${escapeHtml(entry.replay_reason)}</small>` : "";
-          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · Phase: ${escapeHtml(stage)} · Request gesendet: ${entry.request_sent ? "ja" : "nein"} · Quelle: ${escapeHtml(entry.used_source)}</small><small>Ziel: ${escapeHtml(entry.target_url || "—")}</small><small>Methode: ${method} · Content-Type: ${contentType}</small><small>Replay vorhanden: ${replayFlag} · Replay verwendet: ${replayUsed} · Body unverändert: ${bodyUnchanged}</small><small>Fehler: ${err}</small>${replayReason}${excerpt}</div>`;
+          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · Phase: ${escapeHtml(stage)} · Request gesendet: ${entry.request_sent ? "ja" : "nein"} · Quelle: ${escapeHtml(entry.used_source)}</small><small>Ziel: ${escapeHtml(entry.target_url || "—")}</small><small>Methode: ${method} · Content-Type: ${contentType}</small><small>Body-Quelle: ${bodySource} · Header-Quelle: ${headerSource}</small><small>Replay vorhanden: ${replayFlag} · Replay verwendet: ${replayUsed} · Body unverändert: ${bodyUnchanged}</small><small>Request device (original): ${originalRequestDevice} · Anzeigename: ${displayDeviceName} · Gesendetes device: ${sentDeviceValue}</small><small>Fehler: ${err}</small>${replayReason}${excerpt}</div>`;
         })
         .join("")
     : `<div class="forwarding-test-row"><small>Keine Versuche ausgeführt.</small></div>`;
@@ -1790,18 +1796,121 @@ function openForwardingModal(existing) {
       syncHeaderManual(!next);
     },
   });
-  const headersField = createField({
-    label: "Manuelle Header (JSON)",
-    type: "textarea",
-    value: existing ? JSON.stringify(existing.headers || {}, null, 2) : "{}",
-    placeholder: "Nur wenn Übernahme oben aus ist",
+  const headerBuilderWrap = document.createElement("div");
+  headerBuilderWrap.className = "forwarding-header-builder";
+  const headerRowsHost = document.createElement("div");
+  headerRowsHost.className = "forwarding-header-builder-rows";
+  const headerActions = document.createElement("div");
+  headerActions.className = "forwarding-header-builder-actions";
+  const addHeaderBtn = createButton({ label: "Header hinzufügen", icon: "add" });
+  addHeaderBtn.classList.add("btn-secondary");
+  const headerPreviewTitle = document.createElement("div");
+  headerPreviewTitle.className = "forwarding-header-preview-title";
+  headerPreviewTitle.textContent = "Header Vorschau (read only)";
+  const headerPreview = document.createElement("pre");
+  headerPreview.className = "forwarding-header-preview";
+  const headerError = document.createElement("small");
+  headerError.className = "forwarding-header-builder-error";
+  const headerRows = Object.entries(existing?.headers || {}).map(([name, value]) => ({
+    name: String(name || ""),
+    value: String(value || ""),
+  }));
+  function setHeaderBuilderError(text) {
+    headerError.textContent = text || "";
+    headerBuilderWrap.classList.toggle("is-error", !!text);
+  }
+  function renderHeaderPreview() {
+    const items = headerRows
+      .map((row) => ({
+        name: String(row.name || "").trim(),
+        value: String(row.value || "").trim(),
+      }))
+      .filter((row) => row.name && row.value);
+    if (!items.length) {
+      headerPreview.textContent = "Keine Header definiert.";
+      return;
+    }
+    headerPreview.textContent = items.map((row) => `${row.name}: ${row.value}`).join("\n");
+  }
+  function renderHeaderRows() {
+    headerRowsHost.innerHTML = "";
+    headerRows.forEach((row, index) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "forwarding-header-row";
+      const nameInput = document.createElement("input");
+      nameInput.className = "input forwarding-header-name";
+      nameInput.placeholder = "Header Name";
+      nameInput.value = row.name || "";
+      const valueInput = document.createElement("input");
+      valueInput.className = "input forwarding-header-value";
+      valueInput.placeholder = "Header Value";
+      valueInput.value = row.value || "";
+      const upBtn = createIconButton({
+        icon: "arrow_upward",
+        title: "Nach oben",
+        onClick: () => {
+          if (index === 0) return;
+          const prev = headerRows[index - 1];
+          headerRows[index - 1] = headerRows[index];
+          headerRows[index] = prev;
+          renderHeaderRows();
+        },
+      });
+      const downBtn = createIconButton({
+        icon: "arrow_downward",
+        title: "Nach unten",
+        onClick: () => {
+          if (index >= headerRows.length - 1) return;
+          const next = headerRows[index + 1];
+          headerRows[index + 1] = headerRows[index];
+          headerRows[index] = next;
+          renderHeaderRows();
+        },
+      });
+      const removeBtn = createIconButton({
+        icon: "delete",
+        title: "Header entfernen",
+        onClick: () => {
+          headerRows.splice(index, 1);
+          renderHeaderRows();
+        },
+      });
+      removeBtn.classList.add("btn-danger");
+      nameInput.addEventListener("input", () => {
+        headerRows[index].name = nameInput.value;
+        renderHeaderPreview();
+      });
+      valueInput.addEventListener("input", () => {
+        headerRows[index].value = valueInput.value;
+        renderHeaderPreview();
+      });
+      rowEl.append(nameInput, valueInput, upBtn, downBtn, removeBtn);
+      headerRowsHost.appendChild(rowEl);
+    });
+    renderHeaderPreview();
+  }
+  function sanitizeHeaderRows() {
+    const out = {};
+    headerRows.forEach((row) => {
+      const key = String(row.name || "").trim();
+      const value = String(row.value || "").trim();
+      if (!key || !value) return;
+      out[key] = value;
+    });
+    return out;
+  }
+  addHeaderBtn.addEventListener("click", () => {
+    headerRows.push({ name: "", value: "" });
+    renderHeaderRows();
   });
+  headerActions.append(addHeaderBtn);
+  headerBuilderWrap.append(headerRowsHost, headerActions, headerPreviewTitle, headerPreview, headerError);
+  renderHeaderRows();
   function syncHeaderManual(allowEdit) {
-    headersField.input.disabled = !allowEdit;
-    headersField.field.classList.toggle("is-disabled", !allowEdit);
+    headerBuilderWrap.hidden = !allowEdit;
   }
   syncHeaderManual(!incomingHeadersOnly);
-  headerSection.append(headerTitle, hdrFromDeviceSw.wrap, headersField.field);
+  headerSection.append(headerTitle, hdrFromDeviceSw.wrap, headerBuilderWrap);
 
   const bodySection = document.createElement("div");
   bodySection.className = "forwarding-modal-section";
@@ -1983,28 +2092,18 @@ function openForwardingModal(existing) {
   primaryBtn.addEventListener("click", async () => {
     const incoming_headers_only = hdrFromDeviceSw.toggle.classList.contains("enabled");
     const forward_body_from_source = bodyFromDeviceSw.toggle.classList.contains("enabled");
+    const headersObj = incoming_headers_only ? {} : sanitizeHeaderRows();
+    setHeaderBuilderError("");
+    if (!incoming_headers_only && Object.keys(headersObj).length === 0) {
+      setHeaderBuilderError("Bitte mindestens einen Header definieren oder Header-Übernahme aktivieren.");
+      return;
+    }
     const body_fields = sanitizeBodyRows();
     setBodyBuilderError("");
     if (!forward_body_from_source && body_fields.length === 0) {
       setBodyBuilderError("Bitte mindestens ein Body-Feld konfigurieren.");
       return;
     }
-    let headersObj = {};
-    if (!incoming_headers_only) {
-      const raw = headersField.input.value.trim();
-      if (raw) {
-        try {
-          headersObj = JSON.parse(raw);
-          if (typeof headersObj !== "object" || Array.isArray(headersObj) || headersObj === null) {
-            throw new Error("invalid");
-          }
-        } catch (_err) {
-          setFieldState(headersField, "error", "Ungültiges JSON-Objekt.");
-          return;
-        }
-      }
-    }
-    setFieldState(headersField, "default", "");
     const enabled = ena.toggle.classList.contains("enabled");
     const name = nameField.input.value.trim();
     const url = urlField.input.value.trim();
@@ -2175,8 +2274,12 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
         console.log("Body:");
         console.log(responseText.length > 1000 ? `${responseText.slice(0, 1000)} ...[gekürzt]` : responseText || "—");
         console.log("--- META ---");
-        console.log(`Source: ${attempt.replay_reason || "unbekannt"}`);
+        console.log(`Body source: ${attempt.body_source || attempt.replay_reason || "unbekannt"}`);
+        console.log(`Header source: ${attempt.header_source || "unbekannt"}`);
         console.log(`Body unchanged: ${Boolean(attempt.body_unchanged)}`);
+        console.log(`Original request device: ${attempt.original_request_device || "—"}`);
+        console.log(`Device display name: ${attempt.device_display_name || "—"}`);
+        console.log(`Sent device value: ${attempt.sent_device_value || "—"}`);
         console.log(`Device: ${deviceName}`);
         console.log(`Forwarding: ${forwardingName}`);
         console.groupEnd();
