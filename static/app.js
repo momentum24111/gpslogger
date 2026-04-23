@@ -2149,6 +2149,39 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
       body: JSON.stringify({}),
     });
     const result = res.result || {};
+    const allRuns = Array.isArray(result.device_runs) ? result.device_runs : [];
+    allRuns.forEach((run) => {
+      const attempts = Array.isArray(run.attempts) ? run.attempts : [];
+      attempts.forEach((attempt, index) => {
+        const forwardingName = attempt.forwarding_name || result.forwarding_name || forwarding.name || "Weiterleitung";
+        const deviceName = run.device_name || run.device_id || "Unbekannt";
+        console.group(`[GPSLOGGER TEST] ${deviceName} -> ${forwardingName} #${index + 1}`);
+        console.log("--- GPSLOGGER TEST REQUEST ---");
+        console.log(`Method: ${attempt.final_request_method || attempt.request_method || "POST"}`);
+        console.log(`URL: ${attempt.final_request_url || attempt.target_url || "—"}`);
+        console.log("Headers:");
+        const hdr = attempt.final_request_headers && typeof attempt.final_request_headers === "object" ? attempt.final_request_headers : {};
+        Object.entries(hdr).forEach(([k, v]) => {
+          console.log(`  ${k}: ${v}`);
+        });
+        if (!Object.keys(hdr).length) {
+          console.log("  (keine Headerdaten)");
+        }
+        console.log("Body:");
+        console.log(attempt.final_request_body_text ?? "");
+        console.log("--- RESPONSE ---");
+        console.log(`Status: ${attempt.response_status ?? attempt.http_status ?? "—"}`);
+        const responseText = String(attempt.response_body_text || "");
+        console.log("Body:");
+        console.log(responseText.length > 1000 ? `${responseText.slice(0, 1000)} ...[gekürzt]` : responseText || "—");
+        console.log("--- META ---");
+        console.log(`Source: ${attempt.replay_reason || "unbekannt"}`);
+        console.log(`Body unchanged: ${Boolean(attempt.body_unchanged)}`);
+        console.log(`Device: ${deviceName}`);
+        console.log(`Forwarding: ${forwardingName}`);
+        console.groupEnd();
+      });
+    });
     state.lastForwardingTestResult = result;
     renderForwardingTestResult();
     const devicesTotal = Number(result.devices_total || 0);

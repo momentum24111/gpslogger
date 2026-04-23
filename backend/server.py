@@ -384,6 +384,12 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
             "request_content_type": str(source_content_type or ""),
             "body_unchanged": bool(replay_request.get("body_unchanged", False)) if replay_available else False,
             "replay_reason": "captured_from_original_request" if replay_available else "missing_replay_request_fallback_to_legacy_fields",
+            "final_request_method": "",
+            "final_request_url": "",
+            "final_request_headers": {},
+            "final_request_body_text": "",
+            "response_status": None,
+            "response_body_text": "",
         }
         stats["attempts"].append(attempt_detail)
         try:
@@ -405,11 +411,19 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
                 attempt_detail["body_unchanged"] = False
                 attempt_detail["replay_reason"] = "configured_body_fields"
             method = attempt_detail["request_method"] or "POST"
+            final_body_text = payload_bytes.decode("utf-8", errors="replace")
             attempt_detail["stage"] = "request"
             req = urlrequest.Request(url=url, data=payload_bytes, headers=headers, method=method)
+            attempt_detail["final_request_method"] = method
+            attempt_detail["final_request_url"] = url
+            attempt_detail["final_request_headers"] = {k: v for k, v in req.header_items()}
+            attempt_detail["final_request_body_text"] = final_body_text
             with urlrequest.urlopen(req, timeout=6) as resp:
                 attempt_detail["request_sent"] = True
                 attempt_detail["http_status"] = int(getattr(resp, "status", 200))
+                attempt_detail["response_status"] = attempt_detail["http_status"]
+                response_text = resp.read().decode("utf-8", errors="replace")
+                attempt_detail["response_body_text"] = response_text[:2000]
                 attempt_detail["stage"] = "response"
                 pass
             attempt_detail["ok"] = True
@@ -423,8 +437,11 @@ def forward_record_to_forwardings(item: dict, forwardings: list[dict], *, allow_
             try:
                 body = exc.read().decode("utf-8", errors="replace")
                 attempt_detail["response_excerpt"] = body[:300]
+                attempt_detail["response_body_text"] = body[:2000]
             except Exception:
                 attempt_detail["response_excerpt"] = ""
+                attempt_detail["response_body_text"] = ""
+            attempt_detail["response_status"] = attempt_detail["http_status"]
             stats["failed"] += 1
             label = str(fwd.get("name", "")).strip() or fwd.get("id", "")
             print(f"[forwarding] error ({label}): {exc}")
