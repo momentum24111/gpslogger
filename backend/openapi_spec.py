@@ -639,22 +639,39 @@ def build_openapi_spec() -> dict:
                     "operationId": "getPositions",
                     "parameters": [
                         {
-                            "name": "device_id",
+                            "name": "device",
                             "in": "query",
                             "schema": {"type": "string"},
-                            "description": "Optional Gerät filtern",
+                            "description": (
+                                "Optionaler Gerätefilter nach Anzeigename. "
+                                "Mehrfach möglich (`?device=A&device=B`) oder als CSV (`?device=A,B`)."
+                            ),
                         },
                         {
                             "name": "from",
                             "in": "query",
+                            "required": True,
                             "schema": {"type": "string", "format": "date-time"},
                             "description": "Untergrenze (ISO-8601)",
                         },
                         {
                             "name": "to",
                             "in": "query",
+                            "required": True,
                             "schema": {"type": "string", "format": "date-time"},
                             "description": "Obergrenze (ISO-8601)",
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 500},
+                            "description": "Maximale Anzahl zurückgegebener Positionen",
+                        },
+                        {
+                            "name": "offset",
+                            "in": "query",
+                            "schema": {"type": "integer", "minimum": 0, "default": 0},
+                            "description": "Anzahl passender Positionen, die übersprungen werden",
                         },
                     ],
                     "responses": {
@@ -872,8 +889,29 @@ def build_openapi_spec() -> dict:
                 },
                 "PositionsResponse": {
                     "type": "object",
-                    "properties": {"positions": {"type": "array", "items": {"type": "object"}}},
-                    "required": ["positions"],
+                    "properties": {
+                        "positions": {"type": "array", "items": {"type": "object"}},
+                        "pagination": {
+                            "type": "object",
+                            "properties": {
+                                "limit": {"type": "integer"},
+                                "offset": {"type": "integer"},
+                                "returned": {"type": "integer"},
+                                "has_more": {"type": "boolean"},
+                            },
+                            "required": ["limit", "offset", "returned", "has_more"],
+                        },
+                        "filters": {
+                            "type": "object",
+                            "properties": {
+                                "from": {"type": "string", "format": "date-time"},
+                                "to": {"type": "string", "format": "date-time"},
+                                "device": {"type": "array", "items": {"type": "string"}},
+                            },
+                            "required": ["from", "to", "device"],
+                        },
+                    },
+                    "required": ["positions", "pagination", "filters"],
                 },
                 "RecentGpsResponse": {
                     "type": "object",

@@ -669,9 +669,17 @@ class AppState:
             self.mark_nas_run(saved_count=len(pending), error=None)
             return {"saved_count": len(pending), "nas_path": str(nas_root)}
 
-    def query_positions(self, device_id: str | None, ts_from: str | None, ts_to: str | None) -> list[dict[str, Any]]:
+    def query_positions(
+        self,
+        device_names: list[str] | None,
+        ts_from: str | None,
+        ts_to: str | None,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], bool]:
         if not self.gps_path.exists():
-            return []
+            return [], False
 
         def parse_time(value: str | None):
             if not value:
@@ -683,24 +691,46 @@ class AppState:
 
         left = parse_time(ts_from)
         right = parse_time(ts_to)
+        normalized_device_names: set[str] | None = None
+        if isinstance(device_names, list) and len(device_names) > 0:
+            normalized_device_names = {str(name).strip().lower() for name in device_names if str(name).strip()}
+            if not normalized_device_names:
+                normalized_device_names = None
+        safe_limit = max(1, min(5000, int(limit)))
+        safe_offset = max(0, int(offset))
 
         rows: list[dict[str, Any]] = []
+        skipped = 0
+        has_more = False
         with self.gps_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
-                item = json.loads(line)
-                if device_id and item.get("device_id") != device_id:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
                     continue
+                if normalized_device_names is not None:
+                    item_device_name = str(item.get("device_name", "")).strip().lower()
+                    if item_device_name not in normalized_device_names:
+                        continue
                 item_time = parse_time(item.get("timestamp")) or parse_time(item.get("received_at"))
+                if (left or right) and item_time is None:
+                    continue
                 if left and item_time and item_time < left:
                     continue
                 if right and item_time and item_time > right:
                     continue
                 row = self._position_row_from_stored(item)
                 if row is not None:
+                    if skipped < safe_offset:
+                        skipped += 1
+                        continue
+                    if len(rows) >= safe_limit:
+                        has_more = True
+                        break
                     rows.append(row)
-        return rows
+        return rows, has_more
 
     def get_device_statuses(self) -> dict[str, dict[str, Any]]:
         with self._lock:

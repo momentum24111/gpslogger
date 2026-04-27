@@ -131,6 +131,20 @@ def parse_query_time(value: str | None) -> datetime | None:
         return None
 
 
+def parse_device_filters(query: dict[str, list[str]]) -> list[str]:
+    raw_values: list[str] = []
+    for key in ("device", "devices"):
+        raw_values.extend(query.get(key, []))
+    parsed: list[str] = []
+    for value in raw_values:
+        for chunk in str(value).split(","):
+            name = chunk.strip()
+            if name:
+                parsed.append(name)
+    # Duplikate entfernen, Reihenfolge beibehalten.
+    return list(dict.fromkeys(parsed))
+
+
 def parse_coordinate(value: str, left: float, right: float) -> float | None:
     try:
         parsed = float(value)
@@ -714,20 +728,55 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/positions":
             query_from = (query.get("from", [None])[0] or None)
             query_to = (query.get("to", [None])[0] or None)
+            query_limit = (query.get("limit", ["500"])[0] or "500")
+            query_offset = (query.get("offset", ["0"])[0] or "0")
             left = parse_query_time(query_from)
             right = parse_query_time(query_to)
+            if not query_from or not query_to:
+                return json_response(
+                    self,
+                    {"error": "from und to sind erforderlich (ISO-8601)"},
+                    HTTPStatus.BAD_REQUEST,
+                )
             if query_from and left is None:
                 return json_response(self, {"error": "from muss ISO-Format haben"}, HTTPStatus.BAD_REQUEST)
             if query_to and right is None:
                 return json_response(self, {"error": "to muss ISO-Format haben"}, HTTPStatus.BAD_REQUEST)
             if left and right and left > right:
                 return json_response(self, {"error": "from darf nicht nach to liegen"}, HTTPStatus.BAD_REQUEST)
-            rows = state.query_positions(
-                device_id=(query.get("device_id", [None])[0] or None),
+            try:
+                limit = max(1, min(5000, int(query_limit)))
+            except ValueError:
+                return json_response(self, {"error": "limit muss eine ganze Zahl sein"}, HTTPStatus.BAD_REQUEST)
+            try:
+                offset = max(0, int(query_offset))
+            except ValueError:
+                return json_response(self, {"error": "offset muss eine ganze Zahl sein"}, HTTPStatus.BAD_REQUEST)
+            device_names = parse_device_filters(query)
+            rows, has_more = state.query_positions(
+                device_names=device_names,
                 ts_from=query_from,
                 ts_to=query_to,
+                limit=limit,
+                offset=offset,
             )
-            return json_response(self, {"positions": rows})
+            return json_response(
+                self,
+                {
+                    "positions": rows,
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "returned": len(rows),
+                        "has_more": has_more,
+                    },
+                    "filters": {
+                        "from": query_from,
+                        "to": query_to,
+                        "device": device_names,
+                    },
+                },
+            )
         if route.startswith("/themes/"):
             rel = route.removeprefix("/themes/")
             return self._serve_file(THEMES_DIR / rel)
