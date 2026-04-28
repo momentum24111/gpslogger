@@ -1128,8 +1128,7 @@ async function refreshMapData(opts = {}) {
   if (from) query.set("from", from);
   if (to) query.set("to", to);
   try {
-    const data = await api(`/api/positions?${query.toString()}`);
-    const positions = data.positions || [];
+    const positions = await loadAllPositionsForRange(query);
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
     drawPositions(positions, { preserveView: !!opts.preserveView });
@@ -1140,6 +1139,67 @@ async function refreshMapData(opts = {}) {
       setButtonLoading(opts.reloadBtn, false);
     }
   }
+}
+
+const POSITIONS_PAGE_SIZE = 500;
+const POSITIONS_MAX_PAGES = 200;
+
+function buildPositionDedupKey(pos) {
+  return [
+    pos.device_id ?? "",
+    pos.timestamp ?? "",
+    pos.latitude ?? "",
+    pos.longitude ?? "",
+    pos.accuracy ?? "",
+  ].join("|");
+}
+
+function normalizeAndSortPositions(positions) {
+  const seen = new Set();
+  const merged = [];
+  positions.forEach((pos) => {
+    const key = buildPositionDedupKey(pos);
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(pos);
+  });
+  merged.sort((a, b) => {
+    const tA = Date.parse(String(a?.timestamp ?? ""));
+    const tB = Date.parse(String(b?.timestamp ?? ""));
+    if (Number.isFinite(tA) && Number.isFinite(tB) && tA !== tB) return tA - tB;
+    return String(a?.timestamp ?? "").localeCompare(String(b?.timestamp ?? ""));
+  });
+  return merged;
+}
+
+async function loadAllPositionsForRange(baseQuery) {
+  const allPositions = [];
+  let offset = 0;
+  let hasMore = true;
+  let pages = 0;
+  while (hasMore) {
+    pages += 1;
+    if (pages > POSITIONS_MAX_PAGES) {
+      throw new Error("Zu viele Positionsseiten geladen. Bitte Zeitraum eingrenzen.");
+    }
+    const pageQuery = new URLSearchParams(baseQuery.toString());
+    pageQuery.set("limit", String(POSITIONS_PAGE_SIZE));
+    pageQuery.set("offset", String(offset));
+    const data = await api(`/api/positions?${pageQuery.toString()}`);
+    const positions = Array.isArray(data?.positions) ? data.positions : [];
+    allPositions.push(...positions);
+    const pagination = data?.pagination || {};
+    hasMore = Boolean(pagination.has_more);
+    const returned = Number(pagination.returned ?? positions.length);
+    if (!Number.isFinite(returned) || returned < 0) {
+      throw new Error("Ungültige Pagination-Antwort vom Server.");
+    }
+    if (hasMore && returned === 0) {
+      throw new Error("Pagination konnte nicht fortgesetzt werden (0 Elemente mit has_more=true).");
+    }
+    offset += returned;
+  }
+  return normalizeAndSortPositions(allPositions);
 }
 
 function resolveRangeQuery(range, customFrom, customTo) {
