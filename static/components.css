@@ -1338,6 +1338,10 @@ main {
   user-select: none;
   font: inherit;
   font-size: 0.8125rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   white-space: normal;
   border-radius: var(--interactive-control-radius, var(--radius-sm));
 }
@@ -1350,6 +1354,16 @@ main {
 .segmented input:checked + label {
   background: var(--seg-active-bg, var(--color-primary-soft));
   color: var(--seg-active-fg, var(--color-text));
+}
+
+.map-range-count {
+  font-size: 0.75rem;
+  opacity: 0.95;
+  white-space: nowrap;
+}
+
+.map-range-picker label.is-loading .map-range-count {
+  opacity: 0.85;
 }
 
 .segmented input:focus-visible + label {

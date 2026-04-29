@@ -418,6 +418,7 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
   clearMapOverlays();
   await loadDeviceStatuses();
   const allLatLng = [];
+  let renderedCount = 0;
   state.devices.forEach((device) => {
     if (!state.visibleDeviceIds.has(device.id)) return;
     const st = state.deviceStatuses[device.id];
@@ -452,11 +453,13 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
     });
     ui.markers.set(device.id, marker);
     allLatLng.push([livePoint.latitude, livePoint.longitude]);
+    renderedCount += 1;
   });
   if (!preserveView && allLatLng.length) {
     const bounds = L.latLngBounds(allLatLng);
     if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
   }
+  return renderedCount;
 }
 
 function closeFloatingColorPicker() {
@@ -960,6 +963,7 @@ function buildMapPage() {
   rangeLabel.className = "field-label-text";
   rangeLabel.textContent = "Zeitraum";
   const rangePicker = document.createElement("div");
+  rangePicker.id = "map-range-picker";
   rangePicker.className = "segmented map-range-picker";
   const ranges = [
     { value: MAP_RANGE_CURRENT, label: "Aktuelle Position" },
@@ -986,6 +990,7 @@ function buildMapPage() {
       ui.mapRange = entry.value;
       localStorage.setItem("gpslogger.map.range", ui.mapRange);
       customDateWrap.hidden = ui.mapRange !== "custom";
+      setSelectedRangeCountStatus({ loading: true, count: null });
       refreshMapData({ fromField, toField });
     });
     rangePicker.append(input, label);
@@ -1086,13 +1091,16 @@ function setMapMode(mode) {
 }
 
 async function refreshMapData(opts = {}) {
+  setSelectedRangeCountStatus({ loading: true, count: null });
   if (ui.mapRange === MAP_RANGE_CURRENT) {
     if (opts.reloadBtn) {
       setButtonLoading(opts.reloadBtn, true, "Lädt...");
     }
     try {
-      await drawCurrentPositionsOnly({ preserveView: !!opts.preserveView });
+      const renderedCount = await drawCurrentPositionsOnly({ preserveView: !!opts.preserveView });
+      setSelectedRangeCountStatus({ loading: false, count: renderedCount });
     } catch (err) {
+      setSelectedRangeCountStatus({ loading: false, count: null });
       pushToast(ui.toastArea, err.message, "error");
     } finally {
       if (opts.reloadBtn) {
@@ -1118,6 +1126,7 @@ async function refreshMapData(opts = {}) {
   if (error) {
     setFieldState(fromField, "error", error);
     setFieldState(toField, "error", error);
+    setSelectedRangeCountStatus({ loading: false, count: null });
     return;
   }
 
@@ -1131,8 +1140,10 @@ async function refreshMapData(opts = {}) {
     const positions = await loadAllPositionsForRange(query);
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
-    drawPositions(positions, { preserveView: !!opts.preserveView });
+    const renderedCount = drawPositions(positions, { preserveView: !!opts.preserveView });
+    setSelectedRangeCountStatus({ loading: false, count: renderedCount });
   } catch (err) {
+    setSelectedRangeCountStatus({ loading: false, count: null });
     pushToast(ui.toastArea, err.message, "error");
   } finally {
     if (opts.reloadBtn) {
@@ -1143,6 +1154,36 @@ async function refreshMapData(opts = {}) {
 
 const POSITIONS_PAGE_SIZE = 500;
 const POSITIONS_MAX_PAGES = 200;
+
+function formatPositionCountLabel(count) {
+  const safeCount = Number.isFinite(Number(count)) ? Math.max(0, Number(count)) : 0;
+  return `${safeCount} ${safeCount === 1 ? "Position" : "Positionen"}`;
+}
+
+function setSelectedRangeCountStatus({ loading = false, count = null } = {}) {
+  const rangePicker = document.getElementById("map-range-picker");
+  if (!rangePicker) return;
+  const labels = rangePicker.querySelectorAll("label");
+  labels.forEach((label) => {
+    label.classList.remove("is-loading");
+    const badge = label.querySelector(".map-range-count");
+    if (badge) badge.remove();
+  });
+  const selectedInput = rangePicker.querySelector('input[name="map-range"]:checked');
+  if (!selectedInput) return;
+  const selectedLabel = rangePicker.querySelector(`label[for="${selectedInput.id}"]`);
+  if (!selectedLabel) return;
+  if (!loading && count == null) return;
+  const badge = document.createElement("span");
+  badge.className = "map-range-count";
+  if (loading) {
+    badge.textContent = "Lädt...";
+    selectedLabel.classList.add("is-loading");
+  } else {
+    badge.textContent = formatPositionCountLabel(count);
+  }
+  selectedLabel.appendChild(badge);
+}
 
 function buildPositionDedupKey(pos) {
   return [
@@ -1251,7 +1292,7 @@ function drawPositions(positions, opts = {}) {
   clearMapOverlays();
   const visible = state.visibleDeviceIds;
   const filtered = positions.filter((p) => p.device_id && visible.has(p.device_id));
-  if (!filtered.length) return;
+  if (!filtered.length) return 0;
 
   const byDevice = new Map();
   filtered.forEach((p) => {
@@ -1322,6 +1363,7 @@ function drawPositions(positions, opts = {}) {
     const bounds = L.latLngBounds(allLatLng);
     if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
   }
+  return filtered.length;
 }
 
 function renderDevicesSection() {
