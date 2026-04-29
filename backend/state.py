@@ -681,16 +681,20 @@ class AppState:
         if not self.gps_path.exists():
             return [], False
 
-        def parse_time(value: str | None):
+        def parse_time_utc(value: Any) -> datetime | None:
             if not value:
                 return None
             try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
             except ValueError:
                 return None
+            if parsed.tzinfo is None:
+                # Legacy ohne Offset als UTC interpretieren.
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
 
-        left = parse_time(ts_from)
-        right = parse_time(ts_to)
+        left = parse_time_utc(ts_from)
+        right = parse_time_utc(ts_to)
         normalized_device_names: set[str] | None = None
         if isinstance(device_names, list) and len(device_names) > 0:
             normalized_device_names = {str(name).strip().lower() for name in device_names if str(name).strip()}
@@ -702,6 +706,7 @@ class AppState:
         rows: list[dict[str, Any]] = []
         skipped = 0
         has_more = False
+        skipped_invalid_timestamp = 0
         with self.gps_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -714,8 +719,9 @@ class AppState:
                     item_device_name = str(item.get("device_name", "")).strip().lower()
                     if item_device_name not in normalized_device_names:
                         continue
-                item_time = parse_time(item.get("timestamp")) or parse_time(item.get("received_at"))
+                item_time = parse_time_utc(item.get("timestamp")) or parse_time_utc(item.get("received_at"))
                 if (left or right) and item_time is None:
+                    skipped_invalid_timestamp += 1
                     continue
                 if left and item_time and item_time < left:
                     continue
@@ -730,6 +736,11 @@ class AppState:
                         has_more = True
                         break
                     rows.append(row)
+        if skipped_invalid_timestamp:
+            print(
+                f"[positions] skipped {skipped_invalid_timestamp} entries with invalid or missing timestamps "
+                "for from/to filtering"
+            )
         return rows, has_more
 
     def get_device_statuses(self) -> dict[str, dict[str, Any]]:
