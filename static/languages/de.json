@@ -11,10 +11,25 @@
     "close": "Schließen",
     "cancel": "Abbrechen",
     "confirm": "Bestätigen",
-    "save": "Speichern"
+    "save": "Speichern",
+    "add": "Hinzufügen",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "reload": "Neu laden",
+    "clear": "Leeren",
+    "clearing": "Löscht...",
+    "name": "Name",
+    "enabled": "Aktiviert",
+    "unknown": "Unbekannt",
+    "yes": "ja",
+    "no": "nein",
+    "none": "Keine"
   },
   "errors": {
-    "api": "API Fehler"
+    "api": "API Fehler",
+    "nameRequired": "Name erforderlich.",
+    "urlRequired": "URL erforderlich.",
+    "urlProtocol": "URL muss mit http:// oder https:// beginnen."
   },
   "app": {
     "goToMap": "Zur Karte"
@@ -85,7 +100,62 @@
     },
     "forwardings": {
       "title": "Weiterleitungen",
-      "add": "Neue Weiterleitung hinzufügen"
+      "add": "Neue Weiterleitung hinzufügen",
+      "edit": "Weiterleitung bearbeiten",
+      "saved": "Weiterleitung gespeichert",
+      "added": "Weiterleitung hinzugefügt",
+      "deleted": "Weiterleitung gelöscht",
+      "empty": "Keine Weiterleitungen angelegt.",
+      "fallbackName": "Weiterleitung",
+      "url": "Forwarding-URL",
+      "test": "Testen",
+      "testAria": "Weiterleitung {name} testen",
+      "editAria": "Weiterleitung {name} bearbeiten",
+      "deleteAria": "Weiterleitung {name} löschen",
+      "deleteTitle": "Weiterleitung löschen",
+      "deleteConfirm": "Weiterleitung \"{name}\" wirklich löschen?",
+      "summary": {
+        "headerManual": "Header: manuell (JSON)",
+        "bodyEmpty": "Body: leer"
+      },
+      "header": {
+        "title": "Header",
+        "useIncoming": "HTTP-Header der eingehenden Geräte-Anfrage übernehmen",
+        "add": "Header hinzufügen",
+        "previewTitle": "Header Vorschau (read only)",
+        "none": "Keine Header definiert.",
+        "namePlaceholder": "Header Name",
+        "valuePlaceholder": "Header Value",
+        "remove": "Header entfernen",
+        "required": "Bitte mindestens einen Header definieren oder Header-Übernahme aktivieren."
+      },
+      "body": {
+        "title": "HTTP Body",
+        "useIncoming": "HTTP-Body der eingehenden Geräte-Anfrage übernehmen",
+        "addField": "Feld hinzufügen",
+        "previewTitle": "Vorschau (read only)",
+        "paramPlaceholder": "Parametername",
+        "removeField": "Feld entfernen",
+        "none": "Kein Body-Feld konfiguriert.",
+        "hintRaw": "Der Roh-Body der Geräte-Anfrage (z. B. application/x-www-form-urlencoded) wird unverändert als POST an die Ziel-URL gesendet. Eine manuelle Body-Eingabe entfällt.",
+        "hintBuilder": "Der HTTP-Body wird über den Body-Builder aus bekannten Variablen aufgebaut.",
+        "required": "Bitte mindestens ein Body-Feld konfigurieren."
+      },
+      "bodyVars": {
+        "latitude": "Latitude",
+        "longitude": "Longitude",
+        "requestDevice": "Originalwert Requestfeld device",
+        "deviceName": "Geräte-Anzeigename",
+        "accuracy": "Accuracy",
+        "battery": "Battery",
+        "speed": "Speed",
+        "direction": "Direction",
+        "altitude": "Altitude",
+        "provider": "Provider",
+        "activity": "Activity",
+        "timestamp": "Timestamp/Zeit",
+        "deviceId": "Device ID"
+      }
     },
     "devices": {
       "title": "Geräte"
@@ -97,7 +167,72 @@
     }
   },
   "status": {
-    "title": "Status"
+    "title": "Status",
+    "system": {
+      "title": "Systemstatus",
+      "uptime": "Uptime",
+      "devices": "Geräte",
+      "forwardingQueue": "Forwarding Queue",
+      "pendingNas": "Pending NAS",
+      "storedStatuses": "Gespeicherte Statusobjekte",
+      "lastNasRun": "Letzter NAS-Lauf",
+      "lastNasSaved": "Beim letzten NAS-Lauf gespeichert",
+      "nasErrorState": "NAS Fehlerstatus",
+      "noRunYet": "Noch kein Lauf",
+      "noError": "Kein Fehler"
+    },
+    "forwardingErrors": {
+      "title": "Forwarding Fehler",
+      "none": "Keine Forwarding-Fehler"
+    },
+    "recentGps": {
+      "title": "Letzte GPS Requests",
+      "none": "Keine GPS-Daten",
+      "acc": "acc",
+      "client": "Client",
+      "battery": "Batt"
+    },
+    "forwardingTest": {
+      "error": "Fehler",
+      "response": "Antwort",
+      "replayHint": "Replay-Hinweis",
+      "stage": "Phase",
+      "requestSent": "Request gesendet",
+      "source": "Quelle",
+      "target": "Ziel",
+      "method": "Methode",
+      "contentType": "Content-Type",
+      "bodySource": "Body-Quelle",
+      "headerSource": "Header-Quelle",
+      "replayAvailable": "Replay vorhanden",
+      "replayUsed": "Replay verwendet",
+      "bodyUnchanged": "Body unverändert",
+      "requestDeviceOriginal": "Request device (original)",
+      "displayName": "Anzeigename",
+      "sentDevice": "Gesendetes device",
+      "errorLabel": "Fehler",
+      "noAttempts": "Keine Versuche ausgeführt.",
+      "lastRun": "Letzter Testlauf",
+      "targetUrl": "Ziel-URL",
+      "noteServerSide": "Hinweis: Zielrequest wird serverseitig ausgeführt und ist im Browser-Netzwerk nicht direkt sichtbar.",
+      "devicesTotal": "Geräte gesamt",
+      "withLastPosition": "Mit letzter Position",
+      "withoutLastPosition": "Ohne letzte Position",
+      "withoutReplayRequest": "Ohne Replay-Request",
+      "attempts": "Versuche",
+      "delivered": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "noneExecuted": "Kein Test durchgeführt",
+      "noDevices": "Es sind keine Geräte vorhanden.",
+      "noLastPosition": "Kein Gerät hat eine letzte Position.",
+      "tested": "Weiterleitung getestet",
+      "successDelivered": "Test erfolgreich, {count} Request(s) zugestellt.",
+      "partialFailed": "Test teilweise fehlgeschlagen",
+      "partialDelivered": "{delivered} von {total} Requests zugestellt.",
+      "failedHttp": "Test fehlgeschlagen, HTTP {status} von Zielsystem.",
+      "failedError": "Test fehlgeschlagen, {error}",
+      "failedUnreachable": "Test fehlgeschlagen, Ziel nicht erreichbar."
+    }
   },
   "devices": {
     "never": "Nie",

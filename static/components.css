@@ -381,6 +381,14 @@ main {
   min-height: 100%;
 }
 
+#map-filters > .field {
+  gap: var(--spacing-sm);
+}
+
+#map-filters .field-label-text {
+  padding-inline: 0.5rem;
+}
+
 .map-filters-footer {
   display: grid;
   gap: var(--spacing-sm);
@@ -1001,8 +1009,8 @@ main {
 }
 
 .modal {
-  width: min(1100px, calc(100vw - 2rem));
-  height: calc(100dvh - 2rem);
+  width: min(32rem, calc(100vw - 2rem));
+  height: auto;
   max-height: calc(100dvh - 2rem);
   background: var(--modal-bg, var(--color-surface));
   border-radius: var(--radius-lg);
@@ -1016,6 +1024,11 @@ main {
   transition:
     opacity var(--modal-animation-duration) var(--modal-animation-easing),
     transform var(--modal-animation-duration) var(--modal-animation-easing);
+}
+
+.modal:has(.forwarding-modal-sections),
+.modal:has(.status-modal-content) {
+  width: min(1100px, calc(100vw - 2rem));
 }
 
 .modal-overlay.modal-overlay--shown .modal {

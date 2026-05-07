@@ -11,10 +11,25 @@
     "close": "Close",
     "cancel": "Cancel",
     "confirm": "Confirm",
-    "save": "Save"
+    "save": "Save",
+    "add": "Add",
+    "delete": "Delete",
+    "edit": "Edit",
+    "reload": "Reload",
+    "clear": "Clear",
+    "clearing": "Clearing...",
+    "name": "Name",
+    "enabled": "Enabled",
+    "unknown": "Unknown",
+    "yes": "yes",
+    "no": "no",
+    "none": "None"
   },
   "errors": {
-    "api": "API error"
+    "api": "API error",
+    "nameRequired": "Name is required.",
+    "urlRequired": "URL is required.",
+    "urlProtocol": "URL must start with http:// or https://."
   },
   "app": {
     "goToMap": "Go to map"
@@ -85,7 +100,62 @@
     },
     "forwardings": {
       "title": "Forwardings",
-      "add": "Add forwarding"
+      "add": "Add forwarding",
+      "edit": "Edit forwarding",
+      "saved": "Forwarding saved",
+      "added": "Forwarding added",
+      "deleted": "Forwarding deleted",
+      "empty": "No forwardings configured.",
+      "fallbackName": "Forwarding",
+      "url": "Forwarding URL",
+      "test": "Test",
+      "testAria": "Test forwarding {name}",
+      "editAria": "Edit forwarding {name}",
+      "deleteAria": "Delete forwarding {name}",
+      "deleteTitle": "Delete forwarding",
+      "deleteConfirm": "Really delete forwarding \"{name}\"?",
+      "summary": {
+        "headerManual": "Header: manual (JSON)",
+        "bodyEmpty": "Body: empty"
+      },
+      "header": {
+        "title": "Header",
+        "useIncoming": "Use HTTP headers from incoming device request",
+        "add": "Add header",
+        "previewTitle": "Header preview (read only)",
+        "none": "No headers defined.",
+        "namePlaceholder": "Header name",
+        "valuePlaceholder": "Header value",
+        "remove": "Remove header",
+        "required": "Define at least one header or enable incoming-header mode."
+      },
+      "body": {
+        "title": "HTTP Body",
+        "useIncoming": "Use HTTP body from incoming device request",
+        "addField": "Add field",
+        "previewTitle": "Preview (read only)",
+        "paramPlaceholder": "Parameter name",
+        "removeField": "Remove field",
+        "none": "No body field configured.",
+        "hintRaw": "The raw body from the incoming device request (e.g. application/x-www-form-urlencoded) is forwarded unchanged as POST to the target URL. Manual body input is disabled.",
+        "hintBuilder": "The HTTP body is built via the body builder from known variables.",
+        "required": "Configure at least one body field."
+      },
+      "bodyVars": {
+        "latitude": "Latitude",
+        "longitude": "Longitude",
+        "requestDevice": "Original request field device value",
+        "deviceName": "Device display name",
+        "accuracy": "Accuracy",
+        "battery": "Battery",
+        "speed": "Speed",
+        "direction": "Direction",
+        "altitude": "Altitude",
+        "provider": "Provider",
+        "activity": "Activity",
+        "timestamp": "Timestamp/Time",
+        "deviceId": "Device ID"
+      }
     },
     "devices": {
       "title": "Devices"
@@ -97,7 +167,72 @@
     }
   },
   "status": {
-    "title": "Status"
+    "title": "Status",
+    "system": {
+      "title": "System status",
+      "uptime": "Uptime",
+      "devices": "Devices",
+      "forwardingQueue": "Forwarding queue",
+      "pendingNas": "Pending NAS",
+      "storedStatuses": "Stored status objects",
+      "lastNasRun": "Last NAS run",
+      "lastNasSaved": "Saved in last NAS run",
+      "nasErrorState": "NAS error state",
+      "noRunYet": "No run yet",
+      "noError": "No error"
+    },
+    "forwardingErrors": {
+      "title": "Forwarding errors",
+      "none": "No forwarding errors"
+    },
+    "recentGps": {
+      "title": "Recent GPS requests",
+      "none": "No GPS data",
+      "acc": "acc",
+      "client": "Client",
+      "battery": "Batt"
+    },
+    "forwardingTest": {
+      "error": "Error",
+      "response": "Response",
+      "replayHint": "Replay note",
+      "stage": "Stage",
+      "requestSent": "Request sent",
+      "source": "Source",
+      "target": "Target",
+      "method": "Method",
+      "contentType": "Content-Type",
+      "bodySource": "Body source",
+      "headerSource": "Header source",
+      "replayAvailable": "Replay available",
+      "replayUsed": "Replay used",
+      "bodyUnchanged": "Body unchanged",
+      "requestDeviceOriginal": "Request device (original)",
+      "displayName": "Display name",
+      "sentDevice": "Sent device",
+      "errorLabel": "Error",
+      "noAttempts": "No attempts executed.",
+      "lastRun": "Last test run",
+      "targetUrl": "Target URL",
+      "noteServerSide": "Note: target request is executed server-side and is not directly visible in browser network logs.",
+      "devicesTotal": "Total devices",
+      "withLastPosition": "With last position",
+      "withoutLastPosition": "Without last position",
+      "withoutReplayRequest": "Without replay request",
+      "attempts": "Attempts",
+      "delivered": "Delivered",
+      "failed": "Failed",
+      "noneExecuted": "No test executed",
+      "noDevices": "No devices available.",
+      "noLastPosition": "No device has a last position.",
+      "tested": "Forwarding tested",
+      "successDelivered": "Test successful, {count} request(s) delivered.",
+      "partialFailed": "Test partially failed",
+      "partialDelivered": "{delivered} of {total} requests delivered.",
+      "failedHttp": "Test failed, HTTP {status} from target system.",
+      "failedError": "Test failed, {error}",
+      "failedUnreachable": "Test failed, target unreachable."
+    }
   },
   "devices": {
     "never": "Never",

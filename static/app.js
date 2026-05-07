@@ -97,6 +97,7 @@ const ui = {
   mapSidebarDelegatedClick: false,
   mapSidebarMqBound: false,
   mapSidebarDesktopMode: null,
+  mapSidebarDrawerOpen: null,
   settingsDirty: false,
   settingsUnsavedDialogOpen: false,
   settingsEscKeyListener: null,
@@ -110,19 +111,19 @@ const STORAGE_VISIBLE = "gpslogger.map.visibleDeviceIds";
 const STORAGE_DEVICE_SNAPSHOT = "gpslogger.map.deviceIdsSnapshot";
 const SETTINGS_HASH = "#settings";
 const FORWARDING_BODY_VARIABLES = [
-  { key: "latitude", label: "Latitude" },
-  { key: "longitude", label: "Longitude" },
-  { key: "request_device", label: "Originalwert Requestfeld device" },
-  { key: "device_name", label: "Geräte-Anzeigename" },
-  { key: "accuracy", label: "Accuracy" },
-  { key: "battery", label: "Battery" },
-  { key: "speed", label: "Speed" },
-  { key: "direction", label: "Direction" },
-  { key: "altitude", label: "Altitude" },
-  { key: "provider", label: "Provider" },
-  { key: "activity", label: "Activity" },
-  { key: "timestamp", label: "Timestamp/Zeit" },
-  { key: "device_id", label: "Device ID" },
+  { key: "latitude", labelKey: "settings.forwardings.bodyVars.latitude" },
+  { key: "longitude", labelKey: "settings.forwardings.bodyVars.longitude" },
+  { key: "request_device", labelKey: "settings.forwardings.bodyVars.requestDevice" },
+  { key: "device_name", labelKey: "settings.forwardings.bodyVars.deviceName" },
+  { key: "accuracy", labelKey: "settings.forwardings.bodyVars.accuracy" },
+  { key: "battery", labelKey: "settings.forwardings.bodyVars.battery" },
+  { key: "speed", labelKey: "settings.forwardings.bodyVars.speed" },
+  { key: "direction", labelKey: "settings.forwardings.bodyVars.direction" },
+  { key: "altitude", labelKey: "settings.forwardings.bodyVars.altitude" },
+  { key: "provider", labelKey: "settings.forwardings.bodyVars.provider" },
+  { key: "activity", labelKey: "settings.forwardings.bodyVars.activity" },
+  { key: "timestamp", labelKey: "settings.forwardings.bodyVars.timestamp" },
+  { key: "device_id", labelKey: "settings.forwardings.bodyVars.deviceId" }
 ];
 
 const state = {
@@ -649,6 +650,7 @@ function setMapSidebarDrawerOpen(open) {
   const layout = ui.mapLayoutEl;
   const toggle = ui.mapSidebarToggleEl;
   if (!layout || !toggle) return;
+  ui.mapSidebarDrawerOpen = !!open;
   layout.classList.toggle("map-layout--drawer-open", !!open);
   toggle.classList.toggle("is-active", !!open);
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
@@ -762,6 +764,8 @@ function initMapSidebarDrawer() {
     ui.mapSidebarDesktopMode = isDesktop;
     if (changedViewportMode) {
       setMapSidebarDrawerOpen(isDesktop);
+    } else if (typeof ui.mapSidebarDrawerOpen === "boolean") {
+      setMapSidebarDrawerOpen(ui.mapSidebarDrawerOpen);
     }
     if (isDesktop) {
       ui.mapDrawerBackdropEl?.classList.remove("is-open");
@@ -1750,6 +1754,23 @@ function buildSettingsPage() {
   });
   languageSelect.input.addEventListener("change", async () => {
     await loadLanguage(languageSelect.input.value);
+    if (ui.statusModalOpen && ui.statusModalHost) {
+      ui.statusModalHost.innerHTML = `
+        <section class="settings-section">
+          <h3>${t("status.system.title")}</h3>
+          <div id="status-system-status"></div>
+        </section>
+        <section class="settings-section">
+          <h3>${t("status.forwardingErrors.title")}</h3>
+          <div id="status-forwarding-errors"></div>
+        </section>
+        <section class="settings-section">
+          <h3>${t("status.recentGps.title")}</h3>
+          <div id="status-recent-gps"></div>
+        </section>
+      `;
+      renderStatusModalContent();
+    }
     buildMapPage();
     initMapSidebarDrawer();
     renderMapDeviceList();
@@ -1807,7 +1828,7 @@ function renderForwardingTestResult() {
   (result.device_runs || []).forEach((run) => {
     (run.attempts || []).forEach((attempt) => {
       attempts.push({
-        device_name: run.device_name || run.device_id || "Unbekannt",
+        device_name: run.device_name || run.device_id || t("common.unknown"),
         used_source: run.used_source || "",
         ...attempt,
       });
@@ -1820,45 +1841,45 @@ function renderForwardingTestResult() {
             ? `OK (${entry.http_status || "HTTP"})`
             : entry.http_status
               ? `Fehler (HTTP ${entry.http_status})`
-              : "Fehler";
-          const stage = entry.stage || "unbekannt";
-          const err = entry.error ? escapeHtml(entry.error) : "—";
-          const excerpt = entry.response_excerpt ? `<small>Antwort: ${escapeHtml(entry.response_excerpt)}</small>` : "";
+              : t("status.forwardingTest.error");
+          const stage = entry.stage || t("common.unknown");
+          const err = entry.error ? escapeHtml(entry.error) : t("common.na");
+          const excerpt = entry.response_excerpt ? `<small>${t("status.forwardingTest.response")}: ${escapeHtml(entry.response_excerpt)}</small>` : "";
           const method = escapeHtml(entry.request_method || "POST");
-          const contentType = escapeHtml(entry.request_content_type || "—");
-          const replayFlag = entry.replay_available ? "ja" : "nein";
-          const replayUsed = entry.replay_used ? "ja" : "nein";
-          const bodyUnchanged = entry.body_unchanged ? "ja" : "nein";
-          const bodySource = escapeHtml(entry.body_source || "unbekannt");
-          const headerSource = escapeHtml(entry.header_source || "unbekannt");
-          const originalRequestDevice = escapeHtml(entry.original_request_device || "—");
-          const displayDeviceName = escapeHtml(entry.device_display_name || "—");
-          const sentDeviceValue = escapeHtml(entry.sent_device_value || "—");
-          const replayReason = entry.replay_reason ? `<small>Replay-Hinweis: ${escapeHtml(entry.replay_reason)}</small>` : "";
-          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · Phase: ${escapeHtml(stage)} · Request gesendet: ${entry.request_sent ? "ja" : "nein"} · Quelle: ${escapeHtml(entry.used_source)}</small><small>Ziel: ${escapeHtml(entry.target_url || "—")}</small><small>Methode: ${method} · Content-Type: ${contentType}</small><small>Body-Quelle: ${bodySource} · Header-Quelle: ${headerSource}</small><small>Replay vorhanden: ${replayFlag} · Replay verwendet: ${replayUsed} · Body unverändert: ${bodyUnchanged}</small><small>Request device (original): ${originalRequestDevice} · Anzeigename: ${displayDeviceName} · Gesendetes device: ${sentDeviceValue}</small><small>Fehler: ${err}</small>${replayReason}${excerpt}</div>`;
+          const contentType = escapeHtml(entry.request_content_type || t("common.na"));
+          const replayFlag = entry.replay_available ? t("common.yes") : t("common.no");
+          const replayUsed = entry.replay_used ? t("common.yes") : t("common.no");
+          const bodyUnchanged = entry.body_unchanged ? t("common.yes") : t("common.no");
+          const bodySource = escapeHtml(entry.body_source || t("common.unknown"));
+          const headerSource = escapeHtml(entry.header_source || t("common.unknown"));
+          const originalRequestDevice = escapeHtml(entry.original_request_device || t("common.na"));
+          const displayDeviceName = escapeHtml(entry.device_display_name || t("common.na"));
+          const sentDeviceValue = escapeHtml(entry.sent_device_value || t("common.na"));
+          const replayReason = entry.replay_reason ? `<small>${t("status.forwardingTest.replayHint")}: ${escapeHtml(entry.replay_reason)}</small>` : "";
+          return `<div class="forwarding-test-row"><strong>${escapeHtml(entry.device_name)}</strong><small>${escapeHtml(statusText)} · ${t("status.forwardingTest.stage")}: ${escapeHtml(stage)} · ${t("status.forwardingTest.requestSent")}: ${entry.request_sent ? t("common.yes") : t("common.no")} · ${t("status.forwardingTest.source")}: ${escapeHtml(entry.used_source)}</small><small>${t("status.forwardingTest.target")}: ${escapeHtml(entry.target_url || t("common.na"))}</small><small>${t("status.forwardingTest.method")}: ${method} · ${t("status.forwardingTest.contentType")}: ${contentType}</small><small>${t("status.forwardingTest.bodySource")}: ${bodySource} · ${t("status.forwardingTest.headerSource")}: ${headerSource}</small><small>${t("status.forwardingTest.replayAvailable")}: ${replayFlag} · ${t("status.forwardingTest.replayUsed")}: ${replayUsed} · ${t("status.forwardingTest.bodyUnchanged")}: ${bodyUnchanged}</small><small>${t("status.forwardingTest.requestDeviceOriginal")}: ${originalRequestDevice} · ${t("status.forwardingTest.displayName")}: ${displayDeviceName} · ${t("status.forwardingTest.sentDevice")}: ${sentDeviceValue}</small><small>${t("status.forwardingTest.errorLabel")}: ${err}</small>${replayReason}${excerpt}</div>`;
         })
         .join("")
-    : `<div class="forwarding-test-row"><small>Keine Versuche ausgeführt.</small></div>`;
+    : `<div class="forwarding-test-row"><small>${t("status.forwardingTest.noAttempts")}</small></div>`;
   const skippedRows = (result.devices_without_position || []).length
     ? result.devices_without_position
-        .map((row) => `<span>${escapeHtml(row.device_name || row.device_id || "Unbekannt")}</span>`)
+        .map((row) => `<span>${escapeHtml(row.device_name || row.device_id || t("common.unknown"))}</span>`)
         .join(", ")
-    : "Keine";
+    : t("common.none");
   const replayMissingRows = (result.device_runs || [])
     .filter((row) => !row.replay_available)
-    .map((row) => `${row.device_name || row.device_id || "Unbekannt"}${row.replay_reason ? ` (${row.replay_reason})` : ""}`);
+    .map((row) => `${row.device_name || row.device_id || t("common.unknown")}${row.replay_reason ? ` (${row.replay_reason})` : ""}`);
   host.innerHTML = `
     <div class="forwarding-test-head">
-      <strong>Letzter Testlauf: ${escapeHtml(result.forwarding_name || "Weiterleitung")}</strong>
-      <small>Ziel-URL: ${escapeHtml(result.target_url || "—")}</small>
-      <small>Hinweis: Zielrequest wird serverseitig ausgeführt und ist im Browser-Netzwerk nicht direkt sichtbar.</small>
+      <strong>${t("status.forwardingTest.lastRun")}: ${escapeHtml(result.forwarding_name || t("settings.forwardings.fallbackName"))}</strong>
+      <small>${t("status.forwardingTest.targetUrl")}: ${escapeHtml(result.target_url || t("common.na"))}</small>
+      <small>${t("status.forwardingTest.noteServerSide")}</small>
     </div>
     <div class="forwarding-test-summary">
-      <small>Geräte gesamt: ${Number(result.devices_total || 0)}</small>
-      <small>Mit letzter Position: ${Number(result.devices_with_position || 0)}</small>
-      <small>Ohne letzte Position: ${escapeHtml(skippedRows)}</small>
-      <small>Ohne Replay-Request: ${escapeHtml(replayMissingRows.length ? replayMissingRows.join(", ") : "Keine")}</small>
-      <small>Versuche: ${Number(result.requests_attempted || 0)} · Erfolgreich: ${Number(result.requests_delivered || 0)} · Fehlgeschlagen: ${Number(result.requests_failed || 0)}</small>
+      <small>${t("status.forwardingTest.devicesTotal")}: ${Number(result.devices_total || 0)}</small>
+      <small>${t("status.forwardingTest.withLastPosition")}: ${Number(result.devices_with_position || 0)}</small>
+      <small>${t("status.forwardingTest.withoutLastPosition")}: ${escapeHtml(skippedRows)}</small>
+      <small>${t("status.forwardingTest.withoutReplayRequest")}: ${escapeHtml(replayMissingRows.length ? replayMissingRows.join(", ") : t("common.none"))}</small>
+      <small>${t("status.forwardingTest.attempts")}: ${Number(result.requests_attempted || 0)} · ${t("status.forwardingTest.delivered")}: ${Number(result.requests_delivered || 0)} · ${t("status.forwardingTest.failed")}: ${Number(result.requests_failed || 0)}</small>
     </div>
     <div class="forwarding-test-list">${attemptRows}</div>
   `;
@@ -1871,21 +1892,21 @@ async function openStatusModal() {
   content.className = "status-modal-content";
   content.innerHTML = `
     <section class="settings-section">
-      <h3>Systemstatus</h3>
+      <h3>${t("status.system.title")}</h3>
       <div id="status-system-status"></div>
     </section>
     <section class="settings-section">
-      <h3>Forwarding Fehler</h3>
+      <h3>${t("status.forwardingErrors.title")}</h3>
       <div id="status-forwarding-errors"></div>
     </section>
     <section class="settings-section">
-      <h3>Letzte GPS Requests</h3>
+      <h3>${t("status.recentGps.title")}</h3>
       <div id="status-recent-gps"></div>
     </section>
   `;
-  const closeBtn = createButton({ label: "Schließen" });
+  const closeBtn = createButton({ label: t("common.close") });
   const modal = createModal({
-    title: '<span class="material-symbols-outlined" aria-hidden="true">monitoring</span><span>Status</span>',
+    title: `<span class="material-symbols-outlined" aria-hidden="true">monitoring</span><span>${t("status.title")}</span>`,
     content,
     actions: [closeBtn],
     routeHash: "#status",
@@ -1918,23 +1939,23 @@ function renderStatusModalContent() {
 
 function openForwardingModal(existing) {
   const content = document.createElement("div");
-  const nameField = createField({ label: "Name", value: existing?.name || "" });
+  const nameField = createField({ label: t("common.name"), value: existing?.name || "" });
   const ena = createSwitch({
-    label: "Aktiviert",
+    label: t("common.enabled"),
     value: existing ? !!existing.enabled : true,
     onChange: () => {},
   });
-  const urlField = createField({ label: "Forwarding-URL", value: existing?.url || "" });
+  const urlField = createField({ label: t("settings.forwardings.url"), value: existing?.url || "" });
 
   const headerSection = document.createElement("div");
   headerSection.className = "forwarding-modal-section";
   const headerTitle = document.createElement("div");
   headerTitle.className = "forwarding-section-title";
-  headerTitle.textContent = "Header";
+  headerTitle.textContent = t("settings.forwardings.header.title");
   const incomingHeadersOnly =
     existing == null || existing.incoming_headers_only !== false;
   const hdrFromDeviceSw = createSwitch({
-    label: "HTTP-Header der eingehenden Geräte-Anfrage übernehmen",
+    label: t("settings.forwardings.header.useIncoming"),
     value: incomingHeadersOnly,
     onChange: (next) => {
       syncHeaderManual(!next);
@@ -1946,11 +1967,11 @@ function openForwardingModal(existing) {
   headerRowsHost.className = "forwarding-header-builder-rows";
   const headerActions = document.createElement("div");
   headerActions.className = "forwarding-header-builder-actions";
-  const addHeaderBtn = createButton({ label: "Header hinzufügen", icon: "add" });
+  const addHeaderBtn = createButton({ label: t("settings.forwardings.header.add"), icon: "add" });
   addHeaderBtn.classList.add("btn-secondary");
   const headerPreviewTitle = document.createElement("div");
   headerPreviewTitle.className = "forwarding-header-preview-title";
-  headerPreviewTitle.textContent = "Header Vorschau (read only)";
+  headerPreviewTitle.textContent = t("settings.forwardings.header.previewTitle");
   const headerPreview = document.createElement("pre");
   headerPreview.className = "forwarding-header-preview";
   const headerError = document.createElement("small");
@@ -1971,7 +1992,7 @@ function openForwardingModal(existing) {
       }))
       .filter((row) => row.name && row.value);
     if (!items.length) {
-      headerPreview.textContent = "Keine Header definiert.";
+      headerPreview.textContent = t("settings.forwardings.header.none");
       return;
     }
     headerPreview.textContent = items.map((row) => `${row.name}: ${row.value}`).join("\n");
@@ -1983,11 +2004,11 @@ function openForwardingModal(existing) {
       rowEl.className = "forwarding-header-row";
       const nameInput = document.createElement("input");
       nameInput.className = "input forwarding-header-name";
-      nameInput.placeholder = "Header Name";
+      nameInput.placeholder = t("settings.forwardings.header.namePlaceholder");
       nameInput.value = row.name || "";
       const valueInput = document.createElement("input");
       valueInput.className = "input forwarding-header-value";
-      valueInput.placeholder = "Header Value";
+      valueInput.placeholder = t("settings.forwardings.header.valuePlaceholder");
       valueInput.value = row.value || "";
       const upBtn = createIconButton({
         icon: "arrow_upward",
@@ -2013,7 +2034,7 @@ function openForwardingModal(existing) {
       });
       const removeBtn = createIconButton({
         icon: "delete",
-        title: "Header entfernen",
+        title: t("settings.forwardings.header.remove"),
         onClick: () => {
           headerRows.splice(index, 1);
           renderHeaderRows();
@@ -2060,7 +2081,7 @@ function openForwardingModal(existing) {
   bodySection.className = "forwarding-modal-section";
   const bodyTitle = document.createElement("div");
   bodyTitle.className = "forwarding-section-title";
-  bodyTitle.textContent = "HTTP Body";
+  bodyTitle.textContent = t("settings.forwardings.body.title");
   const bodyFromSrc =
     existing == null || existing.forward_body_from_source !== false;
   const bodyHint = document.createElement("p");
@@ -2071,13 +2092,13 @@ function openForwardingModal(existing) {
   bodyBuilderRows.className = "forwarding-body-builder-rows";
   const bodyBuilderActions = document.createElement("div");
   bodyBuilderActions.className = "forwarding-body-builder-actions";
-  const addBodyRowBtn = createButton({ label: "Feld hinzufügen", icon: "add" });
+  const addBodyRowBtn = createButton({ label: t("settings.forwardings.body.addField"), icon: "add" });
   addBodyRowBtn.classList.add("btn-secondary");
   const chipsWrap = document.createElement("div");
   chipsWrap.className = "forwarding-body-builder-chips";
   const previewTitle = document.createElement("div");
   previewTitle.className = "forwarding-body-preview-title";
-  previewTitle.textContent = "Vorschau (read only)";
+  previewTitle.textContent = t("settings.forwardings.body.previewTitle");
   const preview = document.createElement("pre");
   preview.className = "forwarding-body-preview";
   const builderError = document.createElement("small");
@@ -2100,11 +2121,11 @@ function openForwardingModal(existing) {
       rowEl.className = "forwarding-body-row";
       const paramInput = document.createElement("input");
       paramInput.className = "input forwarding-body-param";
-      paramInput.placeholder = "Parametername";
+      paramInput.placeholder = t("settings.forwardings.body.paramPlaceholder");
       paramInput.value = row.param || "";
       const sourceSelect = document.createElement("select");
       sourceSelect.className = "select forwarding-body-source";
-      sourceSelect.innerHTML = FORWARDING_BODY_VARIABLES.map((entry) => `<option value="${entry.key}">${entry.label}</option>`).join("");
+      sourceSelect.innerHTML = FORWARDING_BODY_VARIABLES.map((entry) => `<option value="${entry.key}">${t(entry.labelKey)}</option>`).join("");
       sourceSelect.value = row.source || FORWARDING_BODY_VARIABLES[0].key;
       const upBtn = createIconButton({
         icon: "arrow_upward",
@@ -2130,7 +2151,7 @@ function openForwardingModal(existing) {
       });
       const removeBtn = createIconButton({
         icon: "delete",
-        title: "Feld entfernen",
+        title: t("settings.forwardings.body.removeField"),
         onClick: () => {
           bodyRows.splice(index, 1);
           renderBodyBuilderRows();
@@ -2158,12 +2179,12 @@ function openForwardingModal(existing) {
       }))
       .filter((row) => row.param && row.source);
     if (!pairs.length) {
-      preview.textContent = "Kein Body-Feld konfiguriert.";
+      preview.textContent = t("settings.forwardings.body.none");
       return;
     }
     preview.textContent = pairs
       .map((row) => {
-        const varLabel = FORWARDING_BODY_VARIABLES.find((entry) => entry.key === row.source)?.label || row.source;
+        const varLabel = t(FORWARDING_BODY_VARIABLES.find((entry) => entry.key === row.source)?.labelKey || "", {}, row.source);
         return `${encodeURIComponent(row.param)}=<${varLabel}>`;
       })
       .join("&");
@@ -2186,7 +2207,7 @@ function openForwardingModal(existing) {
   });
   FORWARDING_BODY_VARIABLES.forEach((entry) => {
     const chip = createButton({
-      label: entry.label,
+      label: t(entry.labelKey),
       onClick: () => {
         bodyRows.push({ param: entry.key, source: entry.key });
         renderBodyBuilderRows();
@@ -2201,16 +2222,16 @@ function openForwardingModal(existing) {
   function syncBodyHint(forwardRawBody) {
     if (forwardRawBody) {
       bodyHint.textContent =
-        "Der Roh-Body der Geräte-Anfrage (z. B. application/x-www-form-urlencoded) wird unverändert als POST an die Ziel-URL gesendet. Eine manuelle Body-Eingabe entfällt.";
+        t("settings.forwardings.body.hintRaw");
       bodyBuilderWrap.hidden = true;
     } else {
       bodyHint.textContent =
-        "Der HTTP-Body wird über den Body-Builder aus bekannten Variablen aufgebaut.";
+        t("settings.forwardings.body.hintBuilder");
       bodyBuilderWrap.hidden = false;
     }
   }
   const bodyFromDeviceSw = createSwitch({
-    label: "HTTP-Body der eingehenden Geräte-Anfrage übernehmen",
+    label: t("settings.forwardings.body.useIncoming"),
     value: bodyFromSrc,
     onChange: (next) => {
       syncBodyHint(next);
@@ -2223,12 +2244,12 @@ function openForwardingModal(existing) {
   sectionsWrap.className = "forwarding-modal-sections";
   sectionsWrap.append(headerSection, bodySection);
   content.append(nameField.field, ena.wrap, urlField.field, sectionsWrap);
-  const cancelBtn = createButton({ label: "Abbrechen" });
-  const primaryLabel = existing ? "Speichern" : "Hinzufügen";
+  const cancelBtn = createButton({ label: t("common.cancel") });
+  const primaryLabel = existing ? t("common.save") : t("common.add");
   const primaryBtn = createButton({ label: primaryLabel, icon: existing ? "check" : "add" });
   primaryBtn.classList.add("btn-primary");
   const modal = createModal({
-    title: existing ? "Weiterleitung bearbeiten" : "Neue Weiterleitung",
+    title: existing ? t("settings.forwardings.edit") : t("settings.forwardings.add"),
     content,
     actions: [cancelBtn, primaryBtn],
   });
@@ -2239,33 +2260,33 @@ function openForwardingModal(existing) {
     const headersObj = incoming_headers_only ? {} : sanitizeHeaderRows();
     setHeaderBuilderError("");
     if (!incoming_headers_only && Object.keys(headersObj).length === 0) {
-      setHeaderBuilderError("Bitte mindestens einen Header definieren oder Header-Übernahme aktivieren.");
+      setHeaderBuilderError(t("settings.forwardings.header.required"));
       return;
     }
     const body_fields = sanitizeBodyRows();
     setBodyBuilderError("");
     if (!forward_body_from_source && body_fields.length === 0) {
-      setBodyBuilderError("Bitte mindestens ein Body-Feld konfigurieren.");
+      setBodyBuilderError(t("settings.forwardings.body.required"));
       return;
     }
     const enabled = ena.toggle.classList.contains("enabled");
     const name = nameField.input.value.trim();
     const url = urlField.input.value.trim();
     if (!name) {
-      setFieldState(nameField, "error", "Name erforderlich.");
+      setFieldState(nameField, "error", t("errors.nameRequired"));
       return;
     }
     setFieldState(nameField, "default", "");
     if (!url) {
-      setFieldState(urlField, "error", "URL erforderlich.");
+      setFieldState(urlField, "error", t("errors.urlRequired"));
       return;
     }
     if (!isHttpUrl(url)) {
-      setFieldState(urlField, "error", "URL muss mit http:// oder https:// beginnen.");
+      setFieldState(urlField, "error", t("errors.urlProtocol"));
       return;
     }
     setFieldState(urlField, "default", "");
-    setButtonLoading(primaryBtn, true, "…");
+    setButtonLoading(primaryBtn, true, t("common.saving"));
     try {
       if (existing) {
         await api(`/api/forwardings/${existing.id}`, {
@@ -2296,7 +2317,7 @@ function openForwardingModal(existing) {
       }
       await loadSettings();
       renderForwardingList();
-      pushToast(ui.toastArea, existing ? "Weiterleitung gespeichert" : "Weiterleitung hinzugefügt", "success");
+      pushToast(ui.toastArea, existing ? t("settings.forwardings.saved") : t("settings.forwardings.added"), "success");
       modal.close();
     } catch (err) {
       pushToast(ui.toastArea, err.message, "error");
@@ -2315,7 +2336,7 @@ function renderForwardingList() {
   if (!Array.isArray(list) || list.length === 0) {
     const empty = document.createElement("div");
     empty.className = "list-item list-placeholder";
-    empty.textContent = "Keine Weiterleitungen angelegt.";
+    empty.textContent = t("settings.forwardings.empty");
     host.appendChild(empty);
     return;
   }
@@ -2341,14 +2362,14 @@ function renderForwardingList() {
     const body = document.createElement("div");
     body.className = "list-item-body";
     const t = document.createElement("strong");
-    t.textContent = f.name || "Weiterleitung";
+    t.textContent = f.name || t("settings.forwardings.fallbackName");
     const u = document.createElement("small");
     u.textContent = f.url || "";
     const meta = document.createElement("small");
     meta.className = "list-item-meta";
     const bits = [];
-    if (f.incoming_headers_only === false) bits.push("Header: manuell (JSON)");
-    if (f.forward_body_from_source === false) bits.push("Body: leer");
+    if (f.incoming_headers_only === false) bits.push(t("settings.forwardings.summary.headerManual"));
+    if (f.forward_body_from_source === false) bits.push(t("settings.forwardings.summary.bodyEmpty"));
     meta.textContent = bits.length ? bits.join(" · ") : "";
     body.append(t, document.createElement("br"), u);
     if (meta.textContent) body.append(document.createElement("br"), meta);
@@ -2356,22 +2377,22 @@ function renderForwardingList() {
     actions.className = "ui-item-actions";
     const testBtn = createIconButton({
       icon: "science",
-      title: "Testen",
+      title: t("settings.forwardings.test"),
       onClick: () => runForwardingTest(f, testBtn),
     });
-    testBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} testen`);
+    testBtn.setAttribute("aria-label", t("settings.forwardings.testAria", { name: f.name || "" }));
     const editBtn = createIconButton({
       icon: "edit",
-      title: "Bearbeiten",
+      title: t("common.edit"),
       onClick: () => openForwardingModal(f),
     });
-    editBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} bearbeiten`);
+    editBtn.setAttribute("aria-label", t("settings.forwardings.editAria", { name: f.name || "" }));
     const delBtn = createIconButton({
       icon: "delete",
-      title: "Löschen",
+      title: t("common.delete"),
       onClick: () => openDeleteForwardingModal(f),
     });
-    delBtn.setAttribute("aria-label", `Weiterleitung ${f.name || ""} löschen`);
+    delBtn.setAttribute("aria-label", t("settings.forwardings.deleteAria", { name: f.name || "" }));
     delBtn.classList.add("btn-danger");
     sw.wrap.classList.add("settings-inline-switch");
     actions.append(sw.wrap, testBtn, editBtn, delBtn);
@@ -2396,8 +2417,8 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
     allRuns.forEach((run) => {
       const attempts = Array.isArray(run.attempts) ? run.attempts : [];
       attempts.forEach((attempt, index) => {
-        const forwardingName = attempt.forwarding_name || result.forwarding_name || forwarding.name || "Weiterleitung";
-        const deviceName = run.device_name || run.device_id || "Unbekannt";
+        const forwardingName = attempt.forwarding_name || result.forwarding_name || forwarding.name || t("settings.forwardings.fallbackName");
+        const deviceName = run.device_name || run.device_id || t("common.unknown");
         console.group(`[GPSLOGGER TEST] ${deviceName} -> ${forwardingName} #${index + 1}`);
         console.log("--- GPSLOGGER TEST REQUEST ---");
         console.log(`Method: ${attempt.final_request_method || attempt.request_method || "POST"}`);
@@ -2441,43 +2462,43 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
     if (devicesTotal === 0) {
       pushToast(ui.toastArea, {
         level: "info",
-        title: "Kein Test durchgeführt",
-        description: "Es sind keine Geräte vorhanden.",
+        title: t("status.forwardingTest.noneExecuted"),
+        description: t("status.forwardingTest.noDevices"),
       });
       return;
     }
     if (withPosition === 0) {
       pushToast(ui.toastArea, {
         level: "info",
-        title: "Kein Test durchgeführt",
-        description: "Kein Gerät hat eine letzte Position.",
+        title: t("status.forwardingTest.noneExecuted"),
+        description: t("status.forwardingTest.noLastPosition"),
       });
       return;
     }
     if (delivered > 0 && failed === 0) {
       pushToast(ui.toastArea, {
         level: "success",
-        title: "Weiterleitung getestet",
-        description: `Test erfolgreich, ${delivered} Request(s) zugestellt.`,
+        title: t("status.forwardingTest.tested"),
+        description: t("status.forwardingTest.successDelivered", { count: delivered }),
       });
       return;
     }
     if (delivered > 0 && failed > 0) {
       pushToast(ui.toastArea, {
         level: "info",
-        title: "Test teilweise fehlgeschlagen",
-        description: `${delivered} von ${delivered + failed} Requests zugestellt.`,
+        title: t("status.forwardingTest.partialFailed"),
+        description: t("status.forwardingTest.partialDelivered", { delivered, total: delivered + failed }),
       });
       return;
     }
     const failureMsg = firstFailure?.http_status
-      ? `Test fehlgeschlagen, HTTP ${firstFailure.http_status} von Zielsystem.`
+      ? t("status.forwardingTest.failedHttp", { status: firstFailure.http_status })
       : firstFailure?.error
-        ? `Test fehlgeschlagen, ${firstFailure.error}`
-        : "Test fehlgeschlagen, Ziel nicht erreichbar.";
+        ? t("status.forwardingTest.failedError", { error: firstFailure.error })
+        : t("status.forwardingTest.failedUnreachable");
     pushToast(ui.toastArea, {
       level: "error",
-      title: "Test fehlgeschlagen",
+      title: t("status.forwardingTest.failed"),
       description: failureMsg,
     });
   } catch (err) {
@@ -2485,7 +2506,7 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
     renderForwardingTestResult();
     pushToast(ui.toastArea, {
       level: "error",
-      title: "Test fehlgeschlagen",
+      title: t("status.forwardingTest.failed"),
       description: err.message,
     });
   } finally {
@@ -2498,15 +2519,15 @@ async function runForwardingTest(forwarding, triggerBtn = null) {
 
 function openDeleteForwardingModal(f) {
   openConfirmModal({
-    title: "Weiterleitung löschen",
-    message: `Weiterleitung „${f.name}“ wirklich löschen?`,
-    confirmLabel: "Löschen",
+    title: t("settings.forwardings.deleteTitle"),
+    message: t("settings.forwardings.deleteConfirm", { name: f.name }),
+    confirmLabel: t("common.delete"),
     onConfirm: async () => {
       try {
         await api(`/api/forwardings/${f.id}`, { method: "DELETE" });
         await loadSettings();
         renderForwardingList();
-        pushToast(ui.toastArea, "Weiterleitung gelöscht", "success");
+        pushToast(ui.toastArea, t("settings.forwardings.deleted"), "success");
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
         throw err;
@@ -2523,18 +2544,19 @@ function renderSystemStatus(host = null) {
   const h = Math.floor(uptime / 3600);
   const m = Math.floor((uptime % 3600) / 60);
   const s = uptime % 60;
-  const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString("de-DE") : "Noch kein Lauf";
-  const lastNasError = status.last_nas_error || "Kein Fehler";
+  const locale = currentLanguage === "de" ? "de-DE" : "en-US";
+  const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString(locale) : t("status.system.noRunYet");
+  const lastNasError = status.last_nas_error || t("status.system.noError");
   target.innerHTML = `
     <div class="list">
-      <div class="list-item"><span>Uptime</span><strong>${h}h ${m}m ${s}s</strong></div>
-      <div class="list-item"><span>Geräte</span><strong>${status.device_count ?? 0}</strong></div>
-      <div class="list-item"><span>Forwarding Queue</span><strong>${status.forward_queue_size ?? 0}</strong></div>
-      <div class="list-item"><span>Pending NAS</span><strong>${status.pending_nas_count ?? 0}</strong></div>
-      <div class="list-item"><span>Gespeicherte Statusobjekte</span><strong>${status.stored_status_count ?? 0}</strong></div>
-      <div class="list-item"><span>Letzter NAS-Lauf</span><strong>${lastNasRun}</strong></div>
-      <div class="list-item"><span>Beim letzten NAS-Lauf gespeichert</span><strong>${status.last_nas_saved_count ?? 0}</strong></div>
-      <div class="list-item"><span>NAS Fehlerstatus</span><small>${lastNasError}</small></div>
+      <div class="list-item"><span>${t("status.system.uptime")}</span><strong>${h}h ${m}m ${s}s</strong></div>
+      <div class="list-item"><span>${t("status.system.devices")}</span><strong>${status.device_count ?? 0}</strong></div>
+      <div class="list-item"><span>${t("status.system.forwardingQueue")}</span><strong>${status.forward_queue_size ?? 0}</strong></div>
+      <div class="list-item"><span>${t("status.system.pendingNas")}</span><strong>${status.pending_nas_count ?? 0}</strong></div>
+      <div class="list-item"><span>${t("status.system.storedStatuses")}</span><strong>${status.stored_status_count ?? 0}</strong></div>
+      <div class="list-item"><span>${t("status.system.lastNasRun")}</span><strong>${lastNasRun}</strong></div>
+      <div class="list-item"><span>${t("status.system.lastNasSaved")}</span><strong>${status.last_nas_saved_count ?? 0}</strong></div>
+      <div class="list-item"><span>${t("status.system.nasErrorState")}</span><small>${lastNasError}</small></div>
     </div>
   `;
 }
@@ -2547,22 +2569,22 @@ function renderForwardingErrors(host = null) {
     ? errors
         .map(
           (entry) =>
-            `<div class="list-item"><span>${new Date(entry.time).toLocaleString("de-DE")}</span><small>${entry.message}</small></div>`,
+            `<div class="list-item"><span>${new Date(entry.time).toLocaleString(currentLanguage === "de" ? "de-DE" : "en-US")}</span><small>${entry.message}</small></div>`,
         )
         .join("")
-    : `<div class="list-item"><span>Keine Forwarding-Fehler</span></div>`;
+    : `<div class="list-item"><span>${t("status.forwardingErrors.none")}</span></div>`;
   target.innerHTML = `
     <div class="panel-head">
       <div class="panel-actions">
-        <button data-action="reload-forwarding-errors" class="btn">Neu laden</button>
-        <button data-action="clear-forwarding-errors" class="btn">Leeren</button>
+        <button data-action="reload-forwarding-errors" class="btn">${t("common.reload")}</button>
+        <button data-action="clear-forwarding-errors" class="btn">${t("common.clear")}</button>
       </div>
     </div>
     <div class="list">${rows}</div>
   `;
   const btn = target.querySelector('[data-action="reload-forwarding-errors"]');
   btn?.addEventListener("click", async () => {
-    setButtonLoading(btn, true, "Lädt...");
+    setButtonLoading(btn, true, t("common.loading"));
     try {
       await loadForwardingErrors();
       renderForwardingErrors(target);
@@ -2572,7 +2594,7 @@ function renderForwardingErrors(host = null) {
   });
   const clearBtn = target.querySelector('[data-action="clear-forwarding-errors"]');
   clearBtn?.addEventListener("click", async () => {
-    setButtonLoading(clearBtn, true, "Löscht...");
+    setButtonLoading(clearBtn, true, t("common.clearing"));
     try {
       await api("/api/forwarding/errors/clear", { method: "POST" });
       await loadForwardingErrors();
@@ -2588,13 +2610,13 @@ function renderRecentGps(host = null) {
   if (!target) return;
   const rows = (state.recentGps || [])
     .map((entry) => {
-      const title = entry.device_name || entry.device_id || "Unbekannt";
-      const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString("de-DE") : "—";
+      const title = entry.device_name || entry.device_id || t("common.unknown");
+      const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString(currentLanguage === "de" ? "de-DE" : "en-US") : t("common.na");
       const parts = [
         `${entry.latitude}, ${entry.longitude}`,
-        entry.accuracy != null ? `acc ${entry.accuracy}` : null,
-        entry.device != null && entry.device !== "" ? `Client: ${entry.device}` : null,
-        entry.battery != null && entry.battery !== "" ? `Batt ${entry.battery}` : null,
+        entry.accuracy != null ? `${t("status.recentGps.acc")} ${entry.accuracy}` : null,
+        entry.device != null && entry.device !== "" ? `${t("status.recentGps.client")}: ${entry.device}` : null,
+        entry.battery != null && entry.battery !== "" ? `${t("status.recentGps.battery")} ${entry.battery}` : null,
         entry.speed != null ? `v ${entry.speed}` : null,
         entry.direction != null ? `↗ ${entry.direction}` : null,
         entry.altitude != null ? `alt ${entry.altitude}` : null,
@@ -2608,14 +2630,14 @@ function renderRecentGps(host = null) {
   target.innerHTML = `
     <div class="panel-head">
       <div class="panel-actions">
-        <button data-action="reload-recent-gps" class="btn">Neu laden</button>
+        <button data-action="reload-recent-gps" class="btn">${t("common.reload")}</button>
       </div>
     </div>
-    <div class="list">${rows || `<div class="list-item"><span>Keine GPS-Daten</span></div>`}</div>
+    <div class="list">${rows || `<div class="list-item"><span>${t("status.recentGps.none")}</span></div>`}</div>
   `;
   const btn = target.querySelector('[data-action="reload-recent-gps"]');
   btn?.addEventListener("click", async () => {
-    setButtonLoading(btn, true, "Lädt...");
+    setButtonLoading(btn, true, t("common.loading"));
     try {
       await loadRecentGps();
       renderRecentGps(target);
