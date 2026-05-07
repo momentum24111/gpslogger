@@ -67,6 +67,22 @@ function updateVisibleTexts() {
   if (settingsRestartBtn) settingsRestartBtn.innerHTML = `<span class="material-symbols-outlined">refresh</span> ${t("settings.actions.restart")}`;
   const settingsSaveBtn = document.getElementById("settings-save-btn");
   if (settingsSaveBtn) settingsSaveBtn.innerHTML = `<span class="material-symbols-outlined">check</span> ${t("settings.save")}`;
+  const settingsCancelBtn = document.getElementById("settings-cancel-btn");
+  if (settingsCancelBtn) settingsCancelBtn.textContent = t("settings.cancel");
+  const settingsForwardingLabel = document.getElementById("settings-forwardings-label");
+  if (settingsForwardingLabel) settingsForwardingLabel.textContent = t("settings.forwardings.title");
+  const settingsDevicesLabel = document.getElementById("settings-devices-label");
+  if (settingsDevicesLabel) settingsDevicesLabel.textContent = t("settings.devices.title");
+  const addForwardingBtn = document.getElementById("settings-add-forwarding-btn");
+  if (addForwardingBtn) {
+    addForwardingBtn.innerHTML = `<span class="material-symbols-outlined">add</span> ${t("settings.forwardings.add")}`;
+    addForwardingBtn.setAttribute("aria-label", t("settings.forwardings.add"));
+  }
+  const addDeviceBtn = document.getElementById("settings-add-device-btn");
+  if (addDeviceBtn) {
+    addDeviceBtn.innerHTML = `<span class="material-symbols-outlined">add</span> ${t("settings.devices.add")}`;
+    addDeviceBtn.setAttribute("aria-label", t("settings.devices.add"));
+  }
 
   const rangeLabelByValue = {
     [MAP_RANGE_CURRENT]: t("map.range.current"),
@@ -125,7 +141,7 @@ function updateVisibleTexts() {
     ui.settingsFormRefs.languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
     ui.settingsFormRefs.languageSelect.input.value = currentLanguage;
   }
-  const addFwBtn = document.querySelector("#forwarding-add-host .icon-btn");
+  const addFwBtn = document.querySelector("#forwarding-add-host .btn");
   if (addFwBtn) {
     addFwBtn.title = t("settings.forwardings.add");
     addFwBtn.setAttribute("aria-label", t("settings.forwardings.add"));
@@ -1044,6 +1060,18 @@ async function persistMainSettingsFromUi() {
   ui.settingsDirty = false;
 }
 
+async function discardSettingsAndClose() {
+  try {
+    await loadSettings();
+    applyTheme(state.settings.theme || "light");
+    buildSettingsPage();
+    ui.settingsDirty = false;
+    dismissSettingsRoute();
+  } catch (err) {
+    pushToast(ui.toastArea, err.message, "error");
+  }
+}
+
 function openUnsavedSettingsCloseConfirm(afterResolved) {
   if (ui.settingsUnsavedDialogOpen) return;
   ui.settingsUnsavedDialogOpen = true;
@@ -1546,13 +1574,14 @@ function renderDevicesSection() {
   const listHost = document.getElementById("devices-list");
   if (!createHost || !listHost) return;
   createHost.innerHTML = "";
-  const addBtn = createIconButton({
+  const addBtn = createButton({
+    label: t("settings.devices.add"),
     icon: "add",
-    title: "Gerät hinzufügen",
     onClick: () => openDeviceEditorModal(),
   });
-  addBtn.setAttribute("aria-label", "Gerät hinzufügen");
-  addBtn.classList.add("btn-primary");
+  addBtn.id = "settings-add-device-btn";
+  addBtn.setAttribute("aria-label", t("settings.devices.add"));
+  addBtn.classList.add("btn-primary", "settings-form-button");
   createHost.appendChild(addBtn);
   renderDeviceList();
 }
@@ -1809,21 +1838,23 @@ function buildSettingsPage() {
         <div id="settings-storage" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
-        <div class="settings-section-head">
-          <h3 id="settings-forwardings-title">${t("settings.forwardings.title")}</h3>
-          <div id="forwarding-add-host"></div>
-        </div>
-        <div id="settings-forwarding" class="settings-forwarding-block">
-          <div id="forwardings-list" class="list ui-list"></div>
-          <div id="forwarding-test-result" class="forwarding-test-result" hidden></div>
+        <div class="ui-form-grid">
+          <span id="settings-forwardings-label" class="settings-row-label">${t("settings.forwardings.title")}</span>
+          <div id="settings-forwarding" class="settings-list-field">
+            <div id="forwardings-list" class="list ui-list"></div>
+            <div id="forwarding-add-host" class="settings-list-actions"></div>
+            <div id="forwarding-test-result" class="forwarding-test-result" hidden></div>
+          </div>
         </div>
       </section>
       <section class="settings-section">
-        <div class="settings-section-head">
-          <h3 id="settings-devices-title">${t("settings.devices.title")}</h3>
-          <div id="devices-add-host"></div>
+        <div class="ui-form-grid">
+          <span id="settings-devices-label" class="settings-row-label">${t("settings.devices.title")}</span>
+          <div class="settings-list-field">
+            <div id="devices-list" class="list ui-list"></div>
+            <div id="devices-add-host" class="settings-list-actions"></div>
+          </div>
         </div>
-        <div id="devices-list" class="list ui-list"></div>
       </section>
       <section class="settings-section settings-actions-section">
         <div id="settings-actions" class="ui-form-grid"></div>
@@ -1893,6 +1924,12 @@ function buildSettingsPage() {
   });
   saveBtn.classList.add("btn-primary", "btn-settings-save");
   saveBtn.id = "settings-save-btn";
+  const cancelBtn = createButton({
+    label: t("settings.cancel"),
+    onClick: () => discardSettingsAndClose(),
+  });
+  cancelBtn.id = "settings-cancel-btn";
+  cancelBtn.classList.add("btn-secondary");
 
   themeSelect.input.addEventListener("change", () => {
     applyTheme(themeSelect.input.value);
@@ -1911,13 +1948,14 @@ function buildSettingsPage() {
   });
   systemHost.append(themeSelect.field, languageSelect.field);
   storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
-  const addFwBtn = createIconButton({
+  const addFwBtn = createButton({
+    label: t("settings.forwardings.add"),
     icon: "add",
-    title: t("settings.forwardings.add"),
     onClick: () => openForwardingModal(null),
   });
+  addFwBtn.id = "settings-add-forwarding-btn";
   addFwBtn.setAttribute("aria-label", t("settings.forwardings.add"));
-  addFwBtn.classList.add("btn-primary");
+  addFwBtn.classList.add("btn-primary", "settings-form-button");
   forwardingAddHost?.appendChild(addFwBtn);
   renderForwardingList();
   const actionsHost = page.querySelector("#settings-actions");
@@ -1933,7 +1971,10 @@ function buildSettingsPage() {
   restartBtn.classList.add("btn-secondary", "settings-form-button");
   actionsHost?.append(actionsLabel, restartBtn);
   const saveFooter = page.querySelector("#settings-save-footer");
-  saveFooter?.appendChild(saveBtn);
+  const footerActions = document.createElement("div");
+  footerActions.className = "settings-footer-actions";
+  footerActions.append(cancelBtn, saveBtn);
+  saveFooter?.appendChild(footerActions);
   ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, languageSelect, saveBtn };
   ui.settingsDirty = false;
   renderDevicesSection();

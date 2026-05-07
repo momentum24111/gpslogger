@@ -320,6 +320,24 @@ main {
   padding: 0.55rem 0.65rem;
 }
 
+.select option {
+  background: var(--control-bg, var(--color-surface-elevated));
+  color: var(--control-fg, var(--color-text));
+  font-size: var(--font-size-body);
+  min-height: 2.25rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.input[type="number"] {
+  appearance: textfield;
+}
+
+.input[type="number"]::-webkit-outer-spin-button,
+.input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
 .input:hover,
 .select:hover,
 .textarea:hover {
@@ -1104,6 +1122,25 @@ main {
   gap: var(--spacing-sm);
 }
 
+.settings-row-label {
+  font-size: var(--font-size-body);
+  font-weight: 500;
+}
+
+.settings-list-field {
+  display: grid;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.settings-list-actions {
+  display: grid;
+}
+
+.settings-list-actions .btn {
+  width: 100%;
+}
+
 .settings-section-head {
   display: flex;
   align-items: center;
@@ -1166,16 +1203,28 @@ main {
     column-gap: var(--spacing-md);
     row-gap: var(--spacing-sm);
   }
+
+  .settings-row-label {
+    align-self: start;
+    padding-top: 0.45rem;
+  }
 }
 
 .settings-save-footer {
   margin-top: var(--spacing-md);
   padding-top: var(--spacing-sm);
+  display: grid;
+  gap: var(--spacing-sm);
 }
 
 .settings-save-footer .btn,
 .btn-settings-save {
-  width: 100%;
+  width: auto;
+}
+
+.settings-footer-actions {
+  display: grid;
+  gap: var(--spacing-sm);
 }
 
 @media (min-width: 900px) {
@@ -1203,6 +1252,24 @@ main {
 
   .settings-section .ui-form-grid > .field > .field-message {
     grid-column: 2;
+  }
+
+  .settings-list-field {
+    grid-column: 2;
+  }
+
+  .settings-save-footer {
+    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+    column-gap: var(--spacing-md);
+  }
+
+  .settings-footer-actions {
+    grid-column: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-footer-actions .btn {
+    width: 100%;
   }
 
 }

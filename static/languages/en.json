@@ -85,6 +85,7 @@
     },
     "title": "Settings",
     "close": "Close settings",
+    "cancel": "Cancel",
     "save": "Save settings",
     "system": {
       "title": "System",
@@ -100,7 +101,7 @@
     },
     "forwardings": {
       "title": "Forwardings",
-      "add": "Add forwarding",
+      "add": "Add new forwarding",
       "edit": "Edit forwarding",
       "saved": "Forwarding saved",
       "added": "Forwarding added",
@@ -158,7 +159,8 @@
       }
     },
     "devices": {
-      "title": "Devices"
+      "title": "Devices",
+      "add": "Add new device"
     },
     "actions": {
       "title": "Actions",
