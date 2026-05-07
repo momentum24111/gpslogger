@@ -2361,8 +2361,8 @@ function renderForwardingList() {
     });
     const body = document.createElement("div");
     body.className = "list-item-body";
-    const t = document.createElement("strong");
-    t.textContent = f.name || t("settings.forwardings.fallbackName");
+    const titleEl = document.createElement("strong");
+    titleEl.textContent = f.name || t("settings.forwardings.fallbackName");
     const u = document.createElement("small");
     u.textContent = f.url || "";
     const meta = document.createElement("small");
@@ -2371,7 +2371,7 @@ function renderForwardingList() {
     if (f.incoming_headers_only === false) bits.push(t("settings.forwardings.summary.headerManual"));
     if (f.forward_body_from_source === false) bits.push(t("settings.forwardings.summary.bodyEmpty"));
     meta.textContent = bits.length ? bits.join(" · ") : "";
-    body.append(t, document.createElement("br"), u);
+    body.append(titleEl, document.createElement("br"), u);
     if (meta.textContent) body.append(document.createElement("br"), meta);
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
