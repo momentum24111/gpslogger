@@ -68,7 +68,7 @@ function updateVisibleTexts() {
   const settingsSaveBtn = document.getElementById("settings-save-btn");
   if (settingsSaveBtn) settingsSaveBtn.innerHTML = `<span class="material-symbols-outlined">check</span> ${t("settings.save")}`;
   const settingsCancelBtn = document.getElementById("settings-cancel-btn");
-  if (settingsCancelBtn) settingsCancelBtn.textContent = t("settings.cancel");
+  if (settingsCancelBtn) settingsCancelBtn.innerHTML = `<span class="material-symbols-outlined">close</span> ${t("settings.cancel")}`;
   const settingsForwardingLabel = document.getElementById("settings-forwardings-label");
   if (settingsForwardingLabel) settingsForwardingLabel.textContent = t("settings.forwardings.title");
   const settingsDevicesLabel = document.getElementById("settings-devices-label");
@@ -230,6 +230,7 @@ const ui = {
   mapFitControl: null,
   layers: {},
   markers: new Map(),
+  liveLabelMarkers: [],
   routeLines: [],
   mapMode: localStorage.getItem("gpslogger.map.mode") || "satellite",
   autoRefreshHandle: null,
@@ -548,6 +549,31 @@ function buildPositionTooltipHtml(position, deviceNameFallback = "") {
     .join("")}</div><div class="map-tooltip-actions"><a class="map-tooltip-maps-link btn" href="${mapsUrl}" target="_blank" rel="noopener noreferrer"><span class="material-symbols-outlined" aria-hidden="true">open_in_new</span><span>Google Maps öffnen</span></a></div></div>`;
 }
 
+function getDeviceDisplayName(deviceId, fallback = "") {
+  const device = state.devices.find((entry) => entry.id === deviceId);
+  return device?.name || fallback || deviceId || "";
+}
+
+function getDeviceInitial(deviceName) {
+  return String(deviceName || "?").trim().charAt(0) || "?";
+}
+
+function addLivePointInitialMarker(latLng, deviceName) {
+  const radius = getMapCssNumber("--map-live-point-radius", 7);
+  const diameter = Math.max(1, radius * 2);
+  const marker = L.marker(latLng, {
+    interactive: false,
+    keyboard: false,
+    icon: L.divIcon({
+      className: "map-live-point-initial",
+      html: `<span>${escapeHtml(getDeviceInitial(deviceName))}</span>`,
+      iconSize: [diameter, diameter],
+      iconAnchor: [radius, radius],
+    }),
+  }).addTo(ui.map);
+  ui.liveLabelMarkers.push(marker);
+}
+
 function closePinnedRouteTooltip() {
   if (!ui.pinnedRouteTooltipMarker) return;
   ui.pinnedRouteTooltipMarker.__tooltipPinned = false;
@@ -592,6 +618,8 @@ function bindRoutePointInteractions(marker) {
 function clearMapOverlays() {
   ui.markers.forEach((marker) => ui.map.removeLayer(marker));
   ui.markers.clear();
+  ui.liveLabelMarkers.forEach((marker) => ui.map.removeLayer(marker));
+  ui.liveLabelMarkers = [];
   ui.routeLines.forEach((line) => ui.map.removeLayer(line));
   ui.routeLines = [];
   ui.routePointMarkers.forEach((marker) => ui.map.removeLayer(marker));
@@ -630,12 +658,13 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
     marker.bindTooltip(escapeHtml(formatRelativeTime(livePoint.timestamp)), {
       permanent: true,
       direction: "top",
-      offset: [0, -10],
+      offset: [0, -24],
       className: "map-live-age-tooltip",
     });
     marker.bindPopup(buildPositionTooltipHtml(livePoint, device.name), {
       className: "map-point-tooltip",
     });
+    addLivePointInitialMarker([livePoint.latitude, livePoint.longitude], device.name);
     ui.markers.set(device.id, marker);
     allLatLng.push([livePoint.latitude, livePoint.longitude]);
     renderedCount += 1;
@@ -1552,13 +1581,14 @@ function drawPositions(positions, opts = {}) {
     marker.bindTooltip(escapeHtml(formatRelativeTime(latest.timestamp)), {
       permanent: true,
       direction: "top",
-      offset: [0, -10],
+      offset: [0, -24],
       className: "map-live-age-tooltip",
     });
     marker.bindPopup(buildPositionTooltipHtml(latest), {
       className: "map-point-tooltip map-point-tooltip--live",
     });
     marker.addTo(ui.map);
+    addLivePointInitialMarker([latest.latitude, latest.longitude], getDeviceDisplayName(latest.device_id, latest.device_name));
     ui.markers.set(latest.device_id, marker);
   });
 
@@ -1915,6 +1945,7 @@ function buildSettingsPage() {
       setButtonLoading(saveBtn, true, t("common.saving"));
       try {
         await persistMainSettingsFromUi();
+        dismissSettingsRoute();
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
       } finally {
@@ -1926,6 +1957,7 @@ function buildSettingsPage() {
   saveBtn.id = "settings-save-btn";
   const cancelBtn = createButton({
     label: t("settings.cancel"),
+    icon: "close",
     onClick: () => discardSettingsAndClose(),
   });
   cancelBtn.id = "settings-cancel-btn";

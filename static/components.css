@@ -4,12 +4,13 @@
   --radius-lg: 4px;
   --font-size-body: 14px;
   --font-size-title: 16px;
-  --app-header-block-height: 3.35rem;
+  --app-header-block-height: 3.8rem;
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
   --spacing-md: 0.75rem;
   --spacing-lg: 1rem;
   --spacing-xl: 1.25rem;
+  --control-height: 2.35rem;
   --toast-width: 360px;
   --toast-accent-width: 4px;
   --modal-animation-duration: 0.26s;
@@ -72,7 +73,7 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-md);
-  padding: calc(0.65rem + env(safe-area-inset-top, 0px)) 1rem 0.65rem;
+  padding: calc(1rem + env(safe-area-inset-top, 0px)) 1rem 0.65rem;
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
   background: var(--header-bg, var(--bg, var(--color-bg)));
@@ -132,7 +133,7 @@ main {
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  min-height: 2.125rem;
+  min-height: var(--control-height);
   font-size: 0.875rem;
   line-height: 1;
   position: relative;
@@ -202,8 +203,8 @@ main {
 }
 
 .icon-btn {
-  width: 2.125rem;
-  height: 2.125rem;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
 }
 
@@ -217,7 +218,7 @@ main {
   border: none;
   width: 50px;
   height: 28px;
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   background: var(--seg-bg, var(--color-surface-elevated));
   cursor: pointer;
   position: relative;
@@ -246,7 +247,7 @@ main {
 
 .page {
   display: none;
-  padding: 0.85rem 0.85rem 0;
+  padding: 1rem 1rem 0;
   min-height: 0;
 }
 
@@ -260,7 +261,7 @@ main {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-bottom: 0.85rem;
+  padding-bottom: 1rem;
 }
 
 #page-settings.page.active {
@@ -318,13 +319,14 @@ main {
   border: 1px solid var(--control-border, transparent);
   border-radius: var(--radius-sm);
   padding: 0.55rem 0.65rem;
+  min-height: var(--control-height);
 }
 
 .select option {
   background: var(--control-bg, var(--color-surface-elevated));
   color: var(--control-fg, var(--color-text));
   font-size: var(--font-size-body);
-  min-height: 2.25rem;
+  min-height: var(--control-height);
   padding: 0.55rem 0.65rem;
 }
 
@@ -395,7 +397,7 @@ main {
 #map-filters {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: var(--spacing-lg);
   min-height: 100%;
 }
 
@@ -448,7 +450,7 @@ main {
   text-align: left;
   font: inherit;
   color: inherit;
-  min-height: 2.5rem;
+  min-height: var(--control-height);
 }
 
 .map-device-row:hover {
@@ -571,16 +573,39 @@ main {
   margin-top: 10px;
 }
 
+.map-wrap .leaflet-bar {
+  border: 1px solid var(--leaflet-control-border, var(--color-border));
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.map-wrap .leaflet-control-zoom a,
 .leaflet-control-zoom-fit-btn {
   width: 34px;
   height: 34px;
   border: none;
   cursor: pointer;
-  background: var(--card-bg, var(--color-surface));
-  color: var(--color-text, #1a1d24);
+  background: var(--leaflet-control-bg, var(--card-bg, var(--color-surface)));
+  color: var(--leaflet-control-fg, var(--color-text));
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font: inherit;
+  line-height: 1;
+}
+
+.map-wrap .leaflet-control-zoom a {
+  border-bottom: 1px solid var(--leaflet-control-border, var(--color-border));
+}
+
+.map-wrap .leaflet-control-zoom a:last-child {
+  border-bottom: 0;
+}
+
+.map-wrap .leaflet-control-zoom a:hover,
+.leaflet-control-zoom-fit-btn:hover {
+  background: var(--leaflet-control-hover-bg, var(--hover-bg, var(--color-hover)));
+  color: var(--leaflet-control-hover-fg, var(--leaflet-control-fg, var(--color-text)));
 }
 
 .leaflet-control-zoom-fit-btn .material-symbols-outlined {
@@ -1223,8 +1248,14 @@ main {
 }
 
 .settings-footer-actions {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--spacing-sm);
+}
+
+.settings-footer-actions .btn {
+  min-width: 8.5rem;
 }
 
 @media (min-width: 900px) {
@@ -1265,11 +1296,10 @@ main {
 
   .settings-footer-actions {
     grid-column: 2;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-footer-actions .btn {
-    width: 100%;
+    width: auto;
   }
 
 }
@@ -1350,6 +1380,22 @@ main {
   font-size: 0.75rem;
 }
 
+.map-point-tooltip.leaflet-tooltip-top::before {
+  border-top-color: var(--map-tooltip-bg, var(--color-surface-elevated));
+}
+
+.map-point-tooltip.leaflet-tooltip-bottom::before {
+  border-bottom-color: var(--map-tooltip-bg, var(--color-surface-elevated));
+}
+
+.map-point-tooltip.leaflet-tooltip-left::before {
+  border-left-color: var(--map-tooltip-bg, var(--color-surface-elevated));
+}
+
+.map-point-tooltip.leaflet-tooltip-right::before {
+  border-right-color: var(--map-tooltip-bg, var(--color-surface-elevated));
+}
+
 .map-live-age-tooltip {
   border: none;
   background: var(--map-live-age-bg, var(--map-tooltip-bg, var(--color-surface-elevated)));
@@ -1364,6 +1410,24 @@ main {
   font-weight: 500;
   line-height: 1.25;
   white-space: nowrap;
+}
+
+.map-live-age-tooltip.leaflet-tooltip-top::before {
+  border-top-color: var(--map-live-age-bg, var(--map-tooltip-bg, var(--color-surface-elevated)));
+}
+
+.map-live-point-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--map-live-point-label-fg, var(--map-live-age-fg, var(--color-text)));
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  text-transform: uppercase;
 }
 
 .map-tooltip-content {
@@ -1403,7 +1467,7 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  min-height: 2rem;
+  min-height: var(--control-height);
 }
 
 .map-tooltip-maps-link .material-symbols-outlined {
@@ -1445,6 +1509,7 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  min-height: var(--control-height);
   white-space: normal;
   border-radius: var(--interactive-control-radius, var(--radius-sm));
 }
@@ -1485,12 +1550,12 @@ main {
 }
 
 .ui-item-actions .btn {
-  min-height: 2.1rem;
+  min-height: var(--control-height);
 }
 
 .ui-item-actions .icon-btn {
-  width: 2.1rem;
-  height: 2.1rem;
+  width: var(--control-height);
+  height: var(--control-height);
 }
 
 .settings-inline-switch {
@@ -1564,6 +1629,7 @@ main {
     align-items: stretch;
     flex: 1;
     min-height: 0;
+    column-gap: 0.8rem;
   }
 
   .map-filters-panel {
@@ -1594,6 +1660,10 @@ main {
     overflow: hidden;
     padding-left: 0;
     padding-right: 0;
+  }
+
+  .map-layout:not(.map-layout--drawer-open) {
+    column-gap: 0;
   }
 
   .map-wrap {
@@ -1640,7 +1710,7 @@ main {
   z-index: 1;
   margin: 0;
   width: min(1100px, calc(100vw - 2rem));
-  height: calc(100dvh - 2rem);
+  height: auto;
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
   opacity: 0;

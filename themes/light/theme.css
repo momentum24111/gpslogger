@@ -192,10 +192,16 @@
   --map-live-age-bg: var(--map-tooltip-bg);
   --map-live-age-fg: var(--map-tooltip-fg);
   --map-live-age-shadow: var(--map-tooltip-shadow);
+  --map-live-point-label-fg: var(--color-surface-elevated);
   --map-tooltip-label-fg: var(--color-text-muted);
   --map-tooltip-link-fg: var(--color-primary);
   --map-tooltip-label-width: 6.5rem;
   --map-color-picker-selected-ring: var(--color-primary);
+  --leaflet-control-bg: var(--color-surface-elevated);
+  --leaflet-control-fg: var(--color-text);
+  --leaflet-control-hover-bg: var(--color-hover);
+  --leaflet-control-hover-fg: var(--color-text);
+  --leaflet-control-border: var(--color-border);
 
   --interactive-control-radius: var(--radius-sm);
   --map-sidebar-toggle-active-bg: var(--color-primary);
