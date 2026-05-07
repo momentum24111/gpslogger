@@ -40,6 +40,141 @@ function t(key, vars = {}, fallback = "") {
   return base.replace(/\{(\w+)\}/g, (_m, token) => (vars[token] == null ? "" : String(vars[token])));
 }
 
+function updateVisibleTexts() {
+  const mapSidebarToggle = document.getElementById("map-sidebar-toggle");
+  const brandHomeButton = document.getElementById("brand-home");
+  if (mapSidebarToggle) {
+    const isExpanded = mapSidebarToggle.getAttribute("aria-expanded") === "true";
+    mapSidebarToggle.setAttribute("aria-label", isExpanded ? t("map.menuClose") : t("map.menuOpen"));
+  }
+  if (brandHomeButton) {
+    brandHomeButton.setAttribute("aria-label", t("app.goToMap"));
+  }
+
+  const mapDeviceListLabel = document.getElementById("map-device-list-label");
+  if (mapDeviceListLabel) mapDeviceListLabel.textContent = t("settings.devices.title");
+  const mapDeviceList = document.getElementById("map-device-list");
+  if (mapDeviceList) mapDeviceList.setAttribute("aria-label", t("map.devices.toggleAria"));
+  const mapRangeLabel = document.getElementById("map-range-label");
+  if (mapRangeLabel) mapRangeLabel.textContent = t("map.range.title");
+  const mapStatusBtn = document.getElementById("map-status-btn");
+  if (mapStatusBtn) mapStatusBtn.innerHTML = `<span class="material-symbols-outlined">monitoring</span> ${t("status.title")}`;
+  const mapSettingsBtn = document.getElementById("map-settings-btn");
+  if (mapSettingsBtn) mapSettingsBtn.innerHTML = `<span class="material-symbols-outlined">settings</span> ${t("settings.title")}`;
+  const settingsSaveNowBtn = document.getElementById("settings-save-now-btn");
+  if (settingsSaveNowBtn) settingsSaveNowBtn.innerHTML = `<span class="material-symbols-outlined">save</span> ${t("settings.storage.saveNow")}`;
+  const settingsRestartBtn = document.getElementById("settings-restart-btn");
+  if (settingsRestartBtn) settingsRestartBtn.innerHTML = `<span class="material-symbols-outlined">refresh</span> ${t("settings.actions.restart")}`;
+  const settingsSaveBtn = document.getElementById("settings-save-btn");
+  if (settingsSaveBtn) settingsSaveBtn.innerHTML = `<span class="material-symbols-outlined">check</span> ${t("settings.save")}`;
+
+  const rangeLabelByValue = {
+    [MAP_RANGE_CURRENT]: t("map.range.current"),
+    "1h": t("map.range.last1h"),
+    "6h": t("map.range.last6h"),
+    "24h": t("map.range.last24h"),
+    "7d": t("map.range.last7d"),
+    "30d": t("map.range.last30d"),
+    custom: t("map.range.custom"),
+  };
+  Object.entries(rangeLabelByValue).forEach(([value, text]) => {
+    const input = document.querySelector(`input[name="map-range"][value="${value}"]`);
+    if (!input?.id) return;
+    const label = document.querySelector(`label[for="${input.id}"]`);
+    if (label) {
+      const badge = label.querySelector(".map-range-count");
+      label.textContent = text;
+      if (badge) label.appendChild(badge);
+    }
+  });
+
+  const fromLabel = document.querySelector('#map-from')?.closest(".field")?.querySelector("span");
+  const toLabel = document.querySelector('#map-to')?.closest(".field")?.querySelector("span");
+  if (fromLabel) fromLabel.textContent = t("map.range.fromDate");
+  if (toLabel) toLabel.textContent = t("map.range.toDate");
+
+  const settingsTitle = document.getElementById("settings-title-text");
+  if (settingsTitle) settingsTitle.textContent = t("settings.title");
+  const settingsCloseBtn = document.querySelector(".settings-modal-close");
+  if (settingsCloseBtn) settingsCloseBtn.setAttribute("aria-label", t("settings.close"));
+  const settingsSystemTitle = document.getElementById("settings-system-title");
+  if (settingsSystemTitle) settingsSystemTitle.textContent = t("settings.system.title");
+  const settingsStorageTitle = document.getElementById("settings-storage-title");
+  if (settingsStorageTitle) settingsStorageTitle.textContent = t("settings.storage.title");
+  const settingsForwardingsTitle = document.getElementById("settings-forwardings-title");
+  if (settingsForwardingsTitle) settingsForwardingsTitle.textContent = t("settings.forwardings.title");
+  const settingsDevicesTitle = document.getElementById("settings-devices-title");
+  if (settingsDevicesTitle) settingsDevicesTitle.textContent = t("settings.devices.title");
+  const settingsActionsLabel = document.querySelector(".settings-action-label");
+  if (settingsActionsLabel) settingsActionsLabel.textContent = t("settings.actions.title");
+  if (ui.settingsFormRefs?.nasInterval?.field) {
+    const lbl = ui.settingsFormRefs.nasInterval.field.querySelector("span");
+    if (lbl) lbl.textContent = t("settings.storage.nasInterval");
+  }
+  if (ui.settingsFormRefs?.nasPath?.field) {
+    const lbl = ui.settingsFormRefs.nasPath.field.querySelector("span");
+    if (lbl) lbl.textContent = t("settings.storage.nasPath");
+  }
+  if (ui.settingsFormRefs?.themeSelect?.field) {
+    const lbl = ui.settingsFormRefs.themeSelect.field.querySelector("span");
+    if (lbl) lbl.textContent = t("settings.system.theme");
+  }
+  if (ui.settingsFormRefs?.languageSelect?.field) {
+    const lbl = ui.settingsFormRefs.languageSelect.field.querySelector("span");
+    if (lbl) lbl.textContent = t("settings.system.language");
+    ui.settingsFormRefs.languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
+    ui.settingsFormRefs.languageSelect.input.value = currentLanguage;
+  }
+  const addFwBtn = document.querySelector("#forwarding-add-host .icon-btn");
+  if (addFwBtn) {
+    addFwBtn.title = t("settings.forwardings.add");
+    addFwBtn.setAttribute("aria-label", t("settings.forwardings.add"));
+  }
+
+  document.querySelectorAll("#forwardings-list .list-item-managed").forEach((item) => {
+    const name = item.dataset.forwardingName || "";
+    const titleEl = item.querySelector(".list-item-body strong");
+    if (titleEl && !name) titleEl.textContent = t("settings.forwardings.fallbackName");
+    const metaEl = item.querySelector(".list-item-meta");
+    if (metaEl) {
+      const bits = [];
+      if (item.dataset.incomingHeadersOnly === "false") bits.push(t("settings.forwardings.summary.headerManual"));
+      if (item.dataset.forwardBodyFromSource === "false") bits.push(t("settings.forwardings.summary.bodyEmpty"));
+      metaEl.textContent = bits.join(" · ");
+    }
+    const testBtn = item.querySelector('[data-forwarding-action="test"]');
+    if (testBtn) {
+      testBtn.title = t("settings.forwardings.test");
+      testBtn.setAttribute("aria-label", t("settings.forwardings.testAria", { name }));
+    }
+    const editBtn = item.querySelector('[data-forwarding-action="edit"]');
+    if (editBtn) {
+      editBtn.title = t("common.edit");
+      editBtn.setAttribute("aria-label", t("settings.forwardings.editAria", { name }));
+    }
+    const delBtn = item.querySelector('[data-forwarding-action="delete"]');
+    if (delBtn) {
+      delBtn.title = t("common.delete");
+      delBtn.setAttribute("aria-label", t("settings.forwardings.deleteAria", { name }));
+    }
+  });
+
+  const statusModalTitle = document.querySelector('.modal-overlay .modal-head h3');
+  if (ui.statusModalOpen && statusModalTitle) {
+    statusModalTitle.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">monitoring</span><span>' + t("status.title") + "</span>";
+  }
+  const statusSystemTitle = document.getElementById("status-system-title");
+  const statusForwardingTitle = document.getElementById("status-forwarding-title");
+  const statusRecentGpsTitle = document.getElementById("status-recent-gps-title");
+  if (statusSystemTitle) statusSystemTitle.textContent = t("status.system.title");
+  if (statusForwardingTitle) statusForwardingTitle.textContent = t("status.forwardingErrors.title");
+  if (statusRecentGpsTitle) statusRecentGpsTitle.textContent = t("status.recentGps.title");
+
+  renderSystemStatus(ui.statusModalHost?.querySelector("#status-system-status") || null);
+  renderForwardingErrors(ui.statusModalHost?.querySelector("#status-forwarding-errors") || null);
+  renderRecentGps(ui.statusModalHost?.querySelector("#status-recent-gps") || null);
+}
+
 async function loadLanguage(language) {
   const normalized = SUPPORTED_LANGUAGES.includes(language) ? language : DEFAULT_LANGUAGE;
   const res = await fetch(`/static/languages/${normalized}.json`, { cache: "no-store" });
@@ -985,6 +1120,7 @@ function buildMapPage() {
   const deviceListHost = document.createElement("div");
   deviceListHost.className = "field";
   const deviceListLabel = document.createElement("span");
+  deviceListLabel.id = "map-device-list-label";
   deviceListLabel.className = "field-label-text";
   deviceListLabel.textContent = t("settings.devices.title");
   const deviceList = document.createElement("div");
@@ -996,6 +1132,7 @@ function buildMapPage() {
   const rangeField = document.createElement("div");
   rangeField.className = "field";
   const rangeLabel = document.createElement("span");
+  rangeLabel.id = "map-range-label";
   rangeLabel.className = "field-label-text";
   rangeLabel.textContent = t("map.range.title");
   const rangePicker = document.createElement("div");
@@ -1049,12 +1186,14 @@ function buildMapPage() {
     icon: "monitoring",
     onClick: () => openStatusModal(),
   });
+  statusBtn.id = "map-status-btn";
   statusBtn.classList.add("btn-secondary", "map-settings-btn");
   const settingsBtn = createButton({
     label: t("settings.title"),
     icon: "settings",
     onClick: () => openSettingsModal(),
   });
+  settingsBtn.id = "map-settings-btn";
   settingsBtn.classList.add("btn-secondary", "map-settings-btn");
   footer.append(statusBtn, settingsBtn);
   filtersHost.append(deviceListHost, rangeField, customDateWrap, footer);
@@ -1656,22 +1795,22 @@ function buildSettingsPage() {
     <div class="settings-modal-backdrop" data-action="close-settings"></div>
     <div class="card settings-card settings-modal-card">
       <div class="settings-modal-head">
-        <h2><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>${t("settings.title")}</span></h2>
+        <h2><span class="material-symbols-outlined" aria-hidden="true">settings</span><span id="settings-title-text">${t("settings.title")}</span></h2>
         <button type="button" class="icon-btn settings-modal-close" data-action="close-settings" aria-label="${t("settings.close")}">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
       <section class="settings-section">
-        <h3>${t("settings.system.title")}</h3>
+        <h3 id="settings-system-title">${t("settings.system.title")}</h3>
         <div id="settings-system" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
-        <h3>${t("settings.storage.title")}</h3>
+        <h3 id="settings-storage-title">${t("settings.storage.title")}</h3>
         <div id="settings-storage" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
         <div class="settings-section-head">
-          <h3>${t("settings.forwardings.title")}</h3>
+          <h3 id="settings-forwardings-title">${t("settings.forwardings.title")}</h3>
           <div id="forwarding-add-host"></div>
         </div>
         <div id="settings-forwarding" class="settings-forwarding-block">
@@ -1681,7 +1820,7 @@ function buildSettingsPage() {
       </section>
       <section class="settings-section">
         <div class="settings-section-head">
-          <h3>${t("settings.devices.title")}</h3>
+          <h3 id="settings-devices-title">${t("settings.devices.title")}</h3>
           <div id="devices-add-host"></div>
         </div>
         <div id="devices-list" class="list ui-list"></div>
@@ -1736,6 +1875,7 @@ function buildSettingsPage() {
     },
   });
   saveNowBtn.classList.add("btn-secondary", "settings-form-button");
+  saveNowBtn.id = "settings-save-now-btn";
 
   const saveBtn = createButton({
     label: t("settings.save"),
@@ -1752,6 +1892,7 @@ function buildSettingsPage() {
     },
   });
   saveBtn.classList.add("btn-primary", "btn-settings-save");
+  saveBtn.id = "settings-save-btn";
 
   themeSelect.input.addEventListener("change", () => {
     applyTheme(themeSelect.input.value);
@@ -1759,29 +1900,7 @@ function buildSettingsPage() {
   });
   languageSelect.input.addEventListener("change", async () => {
     await loadLanguage(languageSelect.input.value);
-    if (ui.statusModalOpen && ui.statusModalHost) {
-      ui.statusModalHost.innerHTML = `
-        <section class="settings-section">
-          <h3>${t("status.system.title")}</h3>
-          <div id="status-system-status"></div>
-        </section>
-        <section class="settings-section">
-          <h3>${t("status.forwardingErrors.title")}</h3>
-          <div id="status-forwarding-errors"></div>
-        </section>
-        <section class="settings-section">
-          <h3>${t("status.recentGps.title")}</h3>
-          <div id="status-recent-gps"></div>
-        </section>
-      `;
-      renderStatusModalContent();
-    }
-    buildMapPage();
-    initMapSidebarDrawer();
-    renderMapDeviceList();
-    await refreshMapData({ preserveView: true });
-    buildSettingsPage();
-    openSettingsModalUiOnly();
+    updateVisibleTexts();
     ui.settingsDirty = true;
   });
   nasInterval.input.addEventListener("input", () => {
@@ -1815,7 +1934,7 @@ function buildSettingsPage() {
   actionsHost?.append(actionsLabel, restartBtn);
   const saveFooter = page.querySelector("#settings-save-footer");
   saveFooter?.appendChild(saveBtn);
-  ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, saveBtn };
+  ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, languageSelect, saveBtn };
   ui.settingsDirty = false;
   renderDevicesSection();
 }
@@ -1897,15 +2016,15 @@ async function openStatusModal() {
   content.className = "status-modal-content";
   content.innerHTML = `
     <section class="settings-section">
-      <h3>${t("status.system.title")}</h3>
+      <h3 id="status-system-title">${t("status.system.title")}</h3>
       <div id="status-system-status"></div>
     </section>
     <section class="settings-section">
-      <h3>${t("status.forwardingErrors.title")}</h3>
+      <h3 id="status-forwarding-title">${t("status.forwardingErrors.title")}</h3>
       <div id="status-forwarding-errors"></div>
     </section>
     <section class="settings-section">
-      <h3>${t("status.recentGps.title")}</h3>
+      <h3 id="status-recent-gps-title">${t("status.recentGps.title")}</h3>
       <div id="status-recent-gps"></div>
     </section>
   `;
@@ -2348,6 +2467,9 @@ function renderForwardingList() {
   list.forEach((f) => {
     const item = document.createElement("div");
     item.className = "list-item list-item-managed";
+    item.dataset.forwardingName = f.name || "";
+    item.dataset.incomingHeadersOnly = String(f.incoming_headers_only !== false);
+    item.dataset.forwardBodyFromSource = String(f.forward_body_from_source !== false);
     const leading = document.createElement("div");
     leading.className = "list-item-leading list-item-leading-icon";
     leading.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">alt_route</span>';
@@ -2385,18 +2507,21 @@ function renderForwardingList() {
       title: t("settings.forwardings.test"),
       onClick: () => runForwardingTest(f, testBtn),
     });
+    testBtn.dataset.forwardingAction = "test";
     testBtn.setAttribute("aria-label", t("settings.forwardings.testAria", { name: f.name || "" }));
     const editBtn = createIconButton({
       icon: "edit",
       title: t("common.edit"),
       onClick: () => openForwardingModal(f),
     });
+    editBtn.dataset.forwardingAction = "edit";
     editBtn.setAttribute("aria-label", t("settings.forwardings.editAria", { name: f.name || "" }));
     const delBtn = createIconButton({
       icon: "delete",
       title: t("common.delete"),
       onClick: () => openDeleteForwardingModal(f),
     });
+    delBtn.dataset.forwardingAction = "delete";
     delBtn.setAttribute("aria-label", t("settings.forwardings.deleteAria", { name: f.name || "" }));
     delBtn.classList.add("btn-danger");
     sw.wrap.classList.add("settings-inline-switch");
