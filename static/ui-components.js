@@ -1,3 +1,11 @@
+let i18nTranslate = (key, fallback = "") => fallback || key;
+
+export function configureI18n(translateFn) {
+  if (typeof translateFn === "function") {
+    i18nTranslate = translateFn;
+  }
+}
+
 export function createButton({ label, icon, onClick, selected = false, disabled = false }) {
   const btn = document.createElement("button");
   btn.className = "btn";
@@ -90,15 +98,15 @@ const TOAST_LEAVE_DURATION_MS = 260;
 const TOAST_VARIANTS = {
   success: {
     icon: "check_circle",
-    title: "Erfolg",
+    titleKey: "toast.variant.success",
   },
   error: {
     icon: "error",
-    title: "Fehler",
+    titleKey: "toast.variant.error",
   },
   info: {
     icon: "info",
-    title: "Hinweis",
+    titleKey: "toast.variant.info",
   },
 };
 
@@ -147,14 +155,14 @@ function createToastElement(toast) {
   item.className = `toast toast--${toast.level}`;
   item.setAttribute("role", toast.level === "error" ? "alert" : "status");
   const iconName = toast.icon || variant.icon;
-  const titleText = toast.title || variant.title;
+  const titleText = toast.title || i18nTranslate(variant.titleKey, toast.level);
   item.innerHTML = `
     <div class="toast-icon" aria-hidden="true"><span class="material-symbols-outlined">${escapeHtml(iconName)}</span></div>
     <div class="toast-content">
       <div class="toast-title">${escapeHtml(titleText)}</div>
       <div class="toast-description">${escapeHtml(toast.description)}</div>
     </div>
-    <button class="toast-close icon-btn" type="button" aria-label="Toast schließen" data-ripple="off">
+    <button class="toast-close icon-btn" type="button" aria-label="${escapeHtml(i18nTranslate("toast.close", "Toast schliessen"))}" data-ripple="off">
       <span class="material-symbols-outlined" aria-hidden="true">close</span>
     </button>
   `;
@@ -217,7 +225,7 @@ export function pushToast(area, inputOrText, level = "success") {
   drainToastQueue(area);
 }
 
-export function setButtonLoading(button, isLoading, loadingLabel = "Lädt...") {
+export function setButtonLoading(button, isLoading, loadingLabel = "") {
   if (!button) return;
   if (isLoading) {
     if (!button.dataset.originalHtml) {
@@ -225,7 +233,7 @@ export function setButtonLoading(button, isLoading, loadingLabel = "Lädt...") {
     }
     button.disabled = true;
     button.classList.add("loading");
-    button.textContent = loadingLabel;
+    button.textContent = loadingLabel || i18nTranslate("common.loading", "Loading...");
     return;
   }
   button.disabled = false;
@@ -381,22 +389,23 @@ export function createModal({
   };
 }
 
-export function openInfoModal({ title, content, closeLabel = "Schließen" }) {
-  const closeBtn = createButton({ label: closeLabel });
+export function openInfoModal({ title, content, closeLabel = "" }) {
+  const resolvedCloseLabel = closeLabel || i18nTranslate("common.close", "Close");
+  const closeBtn = createButton({ label: resolvedCloseLabel });
   const modal = createModal({ title, content, actions: [closeBtn] });
   closeBtn.addEventListener("click", () => modal.close());
   modal.open();
   return modal;
 }
 
-export function openConfirmModal({ title, message, confirmLabel = "Bestätigen", cancelLabel = "Abbrechen", onConfirm }) {
+export function openConfirmModal({ title, message, confirmLabel = "", cancelLabel = "", onConfirm }) {
   const content = document.createElement("div");
   content.textContent = message;
-  const cancelBtn = createButton({ label: cancelLabel });
+  const cancelBtn = createButton({ label: cancelLabel || i18nTranslate("common.cancel", "Cancel") });
   const confirmBtn = createButton({
-    label: confirmLabel,
+    label: confirmLabel || i18nTranslate("common.confirm", "Confirm"),
     onClick: async () => {
-      setButtonLoading(confirmBtn, true, "Bitte warten...");
+      setButtonLoading(confirmBtn, true, i18nTranslate("common.pleaseWait", "Please wait..."));
       try {
         await onConfirm?.();
         modal.close();
@@ -416,8 +425,8 @@ export function openConfirmModal({ title, message, confirmLabel = "Bestätigen",
 export function openFormModal({
   title,
   fields,
-  submitLabel = "Speichern",
-  cancelLabel = "Abbrechen",
+  submitLabel = "",
+  cancelLabel = "",
   onSubmit,
 }) {
   const content = document.createElement("div");
@@ -429,15 +438,15 @@ export function openFormModal({
     fieldMap[entry.key] = built;
     content.appendChild(built.field);
   });
-  const cancelBtn = createButton({ label: cancelLabel });
+  const cancelBtn = createButton({ label: cancelLabel || i18nTranslate("common.cancel", "Cancel") });
   const submitBtn = createButton({
-    label: submitLabel,
+    label: submitLabel || i18nTranslate("common.save", "Save"),
     onClick: async () => {
       const values = {};
       Object.entries(controls).forEach(([key, input]) => {
         values[key] = input.value;
       });
-      setButtonLoading(submitBtn, true, "Bitte warten...");
+      setButtonLoading(submitBtn, true, i18nTranslate("common.pleaseWait", "Please wait..."));
       try {
         await onSubmit?.(values, controls, fieldMap);
         modal.close();

@@ -1,7 +1,7 @@
 :root {
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
   --font-size-body: 14px;
   --font-size-title: 16px;
   --app-header-block-height: 3.35rem;
@@ -75,7 +75,7 @@ main {
   padding: calc(0.65rem + env(safe-area-inset-top, 0px)) 1rem 0.65rem;
   padding-left: max(1rem, env(safe-area-inset-left, 0px));
   padding-right: max(1rem, env(safe-area-inset-right, 0px));
-  background: var(--bg-elevated, var(--color-surface));
+  background: var(--header-bg, var(--bg, var(--color-bg)));
 }
 
 .app-header-leading {
@@ -217,7 +217,7 @@ main {
   border: none;
   width: 50px;
   height: 28px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--seg-bg, var(--color-surface-elevated));
   cursor: pointer;
   position: relative;
@@ -287,8 +287,6 @@ main {
 
 #map-filters,
 #devices-create,
-#settings-theme,
-#settings-storage,
 #forwarding-add-host {
   display: grid;
   gap: var(--spacing-md);
@@ -910,7 +908,7 @@ main {
   width: 1.6rem;
   height: 1.6rem;
   min-height: 1.6rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
 }
 
 .toast-close .material-symbols-outlined {
@@ -1073,9 +1071,9 @@ main {
 
 .settings-section {
   display: grid;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-lg);
-  padding-bottom: var(--spacing-md);
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
 }
 
 .settings-section:last-child {
@@ -1086,6 +1084,11 @@ main {
 .settings-section > h3 {
   margin: 0;
   font-size: var(--font-size-title);
+}
+
+.settings-section .ui-form-grid {
+  display: grid;
+  gap: var(--spacing-sm);
 }
 
 .settings-section-head {
@@ -1135,13 +1138,20 @@ main {
 }
 
 .settings-section .ui-form-grid > .btn {
-  width: 100%;
+  width: auto;
 }
 
 @media (min-width: 900px) {
   .settings-section .ui-form-grid > .btn {
-    grid-column: 1 / -1;
+    grid-column: 2;
     justify-self: stretch;
+    width: 100%;
+  }
+
+  .settings-section .ui-form-grid {
+    grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+    column-gap: var(--spacing-md);
+    row-gap: var(--spacing-sm);
   }
 }
 
@@ -1157,9 +1167,11 @@ main {
 
 @media (min-width: 900px) {
   .settings-section .ui-form-grid > .field {
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
-    gap: var(--spacing-md);
+    column-gap: var(--spacing-md);
+    row-gap: var(--spacing-xs);
     align-items: start;
   }
 
@@ -1180,6 +1192,17 @@ main {
     grid-column: 2;
   }
 
+}
+
+.settings-action-label {
+  font-size: var(--font-size-body);
+  font-weight: 500;
+}
+
+@media (min-width: 900px) {
+  .settings-action-label {
+    align-self: center;
+  }
 }
 
 .panel-head h3 {

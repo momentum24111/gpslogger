@@ -16,6 +16,7 @@
 
   --bg: var(--color-bg);
   --bg-elevated: var(--color-surface-elevated);
+  --header-bg: var(--color-bg);
   --panel: var(--color-surface);
   --border: var(--color-border);
   --text: var(--color-text);
@@ -34,9 +35,12 @@
   --shadow: 0 16px 40px var(--color-shadow);
   --overlay-backdrop: var(--color-overlay);
 
-  --radius: var(--radius-md, 12px);
-  --radius-m: var(--radius-sm, 8px);
-  --radius-s: 4px;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius: var(--radius-md);
+  --radius-m: var(--radius-sm);
+  --radius-s: var(--radius-sm);
   --font-small: 0.75rem;
 
   --hover-bg: var(--color-hover);
@@ -127,6 +131,8 @@
 
   --card-bg: var(--color-surface);
   --card-border: var(--color-border);
+  --ui-panel-bg: transparent;
+  --ui-panel-shadow: none;
 
   --sidebar-item-fg: var(--color-text);
   --sidebar-item-hover-bg: var(--color-hover);
@@ -137,7 +143,7 @@
   --spinner-head: var(--color-primary);
 
   --scrollbar-size: 10px;
-  --scrollbar-radius: 999px;
+  --scrollbar-radius: var(--radius-sm);
   --scrollbar-thumb-border: 2px;
   --scrollbar-track-bg: var(--color-surface-elevated);
   --scrollbar-thumb-bg: var(--color-border);
@@ -190,13 +196,18 @@
   --map-tooltip-label-width: 6.5rem;
   --map-color-picker-selected-ring: var(--color-primary);
 
-  --interactive-control-radius: var(--radius-sm, 6px);
+  --interactive-control-radius: var(--radius-sm);
   --map-sidebar-toggle-active-bg: var(--color-primary);
   --map-sidebar-toggle-active-fg: var(--primary-contrast, var(--color-surface));
   --map-sidebar-toggle-active-hover-bg: color-mix(in srgb, var(--color-primary) 88%, var(--color-text));
   --map-sidebar-toggle-active-hover-fg: var(--primary-contrast, var(--color-surface));
   --map-drawer-backdrop-bg: var(--color-overlay);
   --map-drawer-panel-shadow: 0 8px 28px var(--color-shadow);
+}
+
+.card.ui-panel {
+  background: var(--ui-panel-bg);
+  box-shadow: var(--ui-panel-shadow);
 }
 
 .map-color-swatch--0 {

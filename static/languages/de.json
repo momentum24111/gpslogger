@@ -1,0 +1,118 @@
+{
+  "language": {
+    "de": "Deutsch",
+    "en": "Englisch"
+  },
+  "common": {
+    "na": "—",
+    "loading": "Lädt...",
+    "saving": "Speichert...",
+    "pleaseWait": "Bitte warten...",
+    "close": "Schließen",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen",
+    "save": "Speichern"
+  },
+  "errors": {
+    "api": "API Fehler"
+  },
+  "app": {
+    "goToMap": "Zur Karte"
+  },
+  "map": {
+    "menuOpen": "Menü öffnen",
+    "menuClose": "Menü schließen",
+    "noDevices": "Keine Geräte angelegt.",
+    "chooseColor": "Farbe wählen",
+    "satellite": "Satellit",
+    "devices": {
+      "toggleAria": "Geräte ein- und ausblenden"
+    },
+    "range": {
+      "title": "Zeitraum",
+      "current": "Aktuelle Position",
+      "last1h": "Letzte Stunde",
+      "last6h": "Letzte 6 Stunden",
+      "last24h": "Letzte 24 Stunden",
+      "last7d": "Letzte Woche",
+      "last30d": "Letzte 30 Tage",
+      "custom": "Benutzerdefiniert",
+      "fromDate": "Von Datum",
+      "toDate": "Bis Datum"
+    },
+    "fit": {
+      "title": "Auf sichtbare Punkte einpassen",
+      "noVisiblePoints": "Keine sichtbaren Punkte zum Einpassen."
+    }
+  },
+  "time": {
+    "justNow": "gerade eben",
+    "minuteOne": "vor 1 Min.",
+    "minuteMany": "vor {count} Min.",
+    "hourOne": "vor 1 Stunde",
+    "hourMany": "vor {count} Stunden",
+    "dayOne": "vor 1 Tag",
+    "dayMany": "vor {count} Tagen",
+    "weekOne": "vor 1 Woche",
+    "weekMany": "vor {count} Wochen",
+    "monthOne": "vor 1 Monat",
+    "monthMany": "vor {count} Monaten",
+    "yearOne": "vor 1 Jahr",
+    "yearMany": "vor {count} Jahren"
+  },
+  "settings": {
+    "notLoaded": "Einstellungen sind nicht geladen.",
+    "saved": "Einstellungen gespeichert",
+    "unsaved": {
+      "title": "Ungespeicherte Änderungen",
+      "message": "Es gibt nicht gespeicherte Änderungen an NAS-Pfad, Intervall, Theme oder Sprache. Speichern oder verwerfen?",
+      "discard": "Einstellungen verwerfen"
+    },
+    "title": "Einstellungen",
+    "close": "Einstellungen schließen",
+    "save": "Einstellungen speichern",
+    "system": {
+      "title": "System",
+      "theme": "Theme",
+      "language": "Sprache"
+    },
+    "storage": {
+      "title": "Speicherung",
+      "nasInterval": "NAS Intervall (Sekunden)",
+      "nasPath": "NAS Pfad",
+      "saveNow": "GPS-Informationen abspeichern",
+      "savedCount": "Gespeichert: {count}"
+    },
+    "forwardings": {
+      "title": "Weiterleitungen",
+      "add": "Neue Weiterleitung hinzufügen"
+    },
+    "devices": {
+      "title": "Geräte"
+    },
+    "actions": {
+      "title": "Aktionen",
+      "restart": "GPS-Logger neu starten",
+      "restartInProgress": "GPSLogger wird neu gestartet..."
+    }
+  },
+  "status": {
+    "title": "Status"
+  },
+  "devices": {
+    "never": "Nie",
+    "noPosition": "Keine Position",
+    "lastSeen": "Zuletzt gesehen",
+    "position": "Position",
+    "battery": "Akku",
+    "speed": "Geschw."
+  },
+  "toast": {
+    "close": "Toast schließen",
+    "variant": {
+      "success": "Erfolg",
+      "error": "Fehler",
+      "info": "Hinweis"
+    }
+  }
+}

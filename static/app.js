@@ -3,6 +3,7 @@ import {
   createField,
   createIconButton,
   createModal,
+  configureI18n,
   createSwitch,
   createToastArea,
   openConfirmModal,
@@ -23,25 +24,52 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-/** Relative Zeit bis zum angegebenen Zeitpunkt (nur Vergangenheit), z. B. „vor 2 Min.“ */
-function formatRelativeTimeDe(isoString) {
-  const t = new Date(isoString).getTime();
-  if (Number.isNaN(t)) return "—";
-  const diffMs = Math.max(0, Date.now() - t);
+const LANGUAGE_STORAGE_KEY = "gpslogger.language";
+const DEFAULT_LANGUAGE = "de";
+const SUPPORTED_LANGUAGES = ["de", "en"];
+let translations = {};
+let currentLanguage = DEFAULT_LANGUAGE;
+
+function t(key, vars = {}, fallback = "") {
+  const segments = String(key || "").split(".");
+  let value = translations;
+  for (const segment of segments) {
+    value = value?.[segment];
+  }
+  const base = typeof value === "string" ? value : fallback || key;
+  return base.replace(/\{(\w+)\}/g, (_m, token) => (vars[token] == null ? "" : String(vars[token])));
+}
+
+async function loadLanguage(language) {
+  const normalized = SUPPORTED_LANGUAGES.includes(language) ? language : DEFAULT_LANGUAGE;
+  const res = await fetch(`/static/languages/${normalized}.json`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to load language file: ${normalized}`);
+  translations = await res.json();
+  currentLanguage = normalized;
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, normalized);
+  document.documentElement.lang = normalized;
+  configureI18n((key, fallback) => t(key, {}, fallback || key));
+}
+
+/** Relative Zeit bis zum angegebenen Zeitpunkt (nur Vergangenheit). */
+function formatRelativeTime(isoString) {
+  const ts = new Date(isoString).getTime();
+  if (Number.isNaN(ts)) return t("common.na", {}, "-");
+  const diffMs = Math.max(0, Date.now() - ts);
   const sec = Math.floor(diffMs / 1000);
-  if (sec < 45) return "gerade eben";
+  if (sec < 45) return t("time.justNow");
   const min = Math.floor(diffMs / 60000);
-  if (min < 60) return min === 1 ? "vor 1 Min." : `vor ${min} Min.`;
+  if (min < 60) return min === 1 ? t("time.minuteOne") : t("time.minuteMany", { count: min });
   const h = Math.floor(min / 60);
-  if (h < 24) return h === 1 ? "vor 1 Stunde" : `vor ${h} Stunden`;
+  if (h < 24) return h === 1 ? t("time.hourOne") : t("time.hourMany", { count: h });
   const d = Math.floor(h / 24);
-  if (d < 7) return d === 1 ? "vor 1 Tag" : `vor ${d} Tagen`;
+  if (d < 7) return d === 1 ? t("time.dayOne") : t("time.dayMany", { count: d });
   const w = Math.floor(d / 7);
-  if (w < 5) return w === 1 ? "vor 1 Woche" : `vor ${w} Wochen`;
+  if (w < 5) return w === 1 ? t("time.weekOne") : t("time.weekMany", { count: w });
   const mo = Math.floor(d / 30);
-  if (mo < 12) return mo === 1 ? "vor 1 Monat" : `vor ${mo} Monaten`;
+  if (mo < 12) return mo === 1 ? t("time.monthOne") : t("time.monthMany", { count: mo });
   const y = Math.floor(d / 365);
-  return y === 1 ? "vor 1 Jahr" : `vor ${y} Jahren`;
+  return y === 1 ? t("time.yearOne") : t("time.yearMany", { count: y });
 }
 
 const ui = {
@@ -128,7 +156,7 @@ async function api(url, options = {}) {
     ...options,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "API Fehler");
+  if (!res.ok) throw new Error(data.error || t("errors.api"));
   return data;
 }
 
@@ -154,11 +182,11 @@ async function runGpsloggerRestart(button) {
   spin.setAttribute("aria-hidden", "true");
   const text = document.createElement("p");
   text.className = "restart-wait-text";
-  text.textContent = "GPSLogger wird neu gestartet...";
+  text.textContent = t("settings.actions.restartInProgress");
   content.append(spin, text);
 
   const modal = createModal({
-    title: "Neustart",
+    title: t("settings.actions.restart"),
     content,
     actions: [],
     closeOnEscape: false,
@@ -442,7 +470,7 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
       opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
       className: "map-live-point map-live-point--pulse",
     }).addTo(ui.map);
-    marker.bindTooltip(escapeHtml(formatRelativeTimeDe(livePoint.timestamp)), {
+    marker.bindTooltip(escapeHtml(formatRelativeTime(livePoint.timestamp)), {
       permanent: true,
       direction: "top",
       offset: [0, -10],
@@ -556,7 +584,7 @@ function renderMapDeviceList() {
   if (state.devices.length === 0) {
     const empty = document.createElement("p");
     empty.className = "map-device-list-empty";
-    empty.textContent = "Keine Geräte angelegt.";
+    empty.textContent = t("map.noDevices");
     host.appendChild(empty);
     return;
   }
@@ -582,7 +610,7 @@ function renderMapDeviceList() {
     const paletteBtn = document.createElement("button");
     paletteBtn.type = "button";
     paletteBtn.className = "map-device-palette-btn";
-    paletteBtn.setAttribute("aria-label", "Farbe wählen");
+    paletteBtn.setAttribute("aria-label", t("map.chooseColor"));
     paletteBtn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">palette</span>';
     paletteBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -624,7 +652,7 @@ function setMapSidebarDrawerOpen(open) {
   layout.classList.toggle("map-layout--drawer-open", !!open);
   toggle.classList.toggle("is-active", !!open);
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  toggle.setAttribute("aria-label", open ? "Menü schließen" : "Menü öffnen");
+  toggle.setAttribute("aria-label", open ? t("map.menuClose") : t("map.menuOpen"));
   if (ui.mapDrawerBackdropEl) {
     const showBackdrop = !!open && isMobileMapLayout();
     ui.mapDrawerBackdropEl.classList.toggle("is-open", showBackdrop);
@@ -660,7 +688,7 @@ function zoomMapToVisiblePoints() {
   if (!ui.map) return;
   const points = collectVisibleMapLatLng();
   if (!points.length) {
-    pushToast(ui.toastArea, "Keine sichtbaren Punkte zum Einpassen.", "error");
+    pushToast(ui.toastArea, t("map.fit.noVisiblePoints"), "error");
     return;
   }
   const bounds = L.latLngBounds(points);
@@ -684,8 +712,8 @@ function initMapFitControl() {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-control-zoom-fit");
       const btn = L.DomUtil.create("button", "leaflet-control-zoom-fit-btn", container);
       btn.type = "button";
-      btn.setAttribute("aria-label", "Auf sichtbare Punkte einpassen");
-      btn.title = "Auf sichtbare Punkte einpassen";
+      btn.setAttribute("aria-label", t("map.fit.title"));
+      btn.title = t("map.fit.title");
       btn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">crop_free</span>';
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
@@ -850,7 +878,7 @@ function dismissSettingsRoute() {
 async function persistMainSettingsFromUi() {
   const refs = ui.settingsFormRefs;
   if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect) {
-    throw new Error("Einstellungen sind nicht geladen.");
+    throw new Error(t("settings.notLoaded"));
   }
   const { nasInterval, nasPath, themeSelect } = refs;
   setFieldState(nasInterval, "default", "");
@@ -868,7 +896,7 @@ async function persistMainSettingsFromUi() {
   state.settings = data.settings;
   applyTheme(state.settings.theme);
   setFieldState(nasInterval, "success", "");
-  pushToast(ui.toastArea, "Einstellungen gespeichert", "success");
+  pushToast(ui.toastArea, t("settings.saved"), "success");
   ui.settingsDirty = false;
 }
 
@@ -876,14 +904,13 @@ function openUnsavedSettingsCloseConfirm(afterResolved) {
   if (ui.settingsUnsavedDialogOpen) return;
   ui.settingsUnsavedDialogOpen = true;
   const message = document.createElement("div");
-  message.textContent =
-    "Es gibt nicht gespeicherte Änderungen an NAS-Pfad, Intervall oder Theme. Speichern oder verwerfen?";
-  const discardBtn = createButton({ label: "Einstellungen verwerfen" });
+  message.textContent = t("settings.unsaved.message");
+  const discardBtn = createButton({ label: t("settings.unsaved.discard") });
   discardBtn.classList.add("btn-secondary");
-  const saveBtn = createButton({ label: "Speichern", icon: "check" });
+  const saveBtn = createButton({ label: t("common.save"), icon: "check" });
   saveBtn.classList.add("btn-primary");
   const modal = createModal({
-    title: "Ungespeicherte Änderungen",
+    title: t("settings.unsaved.title"),
     content: message,
     actions: [discardBtn, saveBtn],
     closeOnBackdrop: false,
@@ -905,7 +932,7 @@ function openUnsavedSettingsCloseConfirm(afterResolved) {
     }
   });
   saveBtn.addEventListener("click", async () => {
-    setButtonLoading(saveBtn, true, "Speichert...");
+    setButtonLoading(saveBtn, true, t("common.saving"));
     try {
       await persistMainSettingsFromUi();
       ui.settingsUnsavedDialogOpen = false;
@@ -950,29 +977,29 @@ function buildMapPage() {
   deviceListHost.className = "field";
   const deviceListLabel = document.createElement("span");
   deviceListLabel.className = "field-label-text";
-  deviceListLabel.textContent = "Geräte";
+  deviceListLabel.textContent = t("settings.devices.title");
   const deviceList = document.createElement("div");
   deviceList.id = "map-device-list";
   deviceList.className = "map-device-list";
   deviceList.setAttribute("role", "group");
-  deviceList.setAttribute("aria-label", "Geräte ein- und ausblenden");
+  deviceList.setAttribute("aria-label", t("map.devices.toggleAria"));
   deviceListHost.append(deviceListLabel, deviceList);
   const rangeField = document.createElement("div");
   rangeField.className = "field";
   const rangeLabel = document.createElement("span");
   rangeLabel.className = "field-label-text";
-  rangeLabel.textContent = "Zeitraum";
+  rangeLabel.textContent = t("map.range.title");
   const rangePicker = document.createElement("div");
   rangePicker.id = "map-range-picker";
   rangePicker.className = "segmented map-range-picker";
   const ranges = [
-    { value: MAP_RANGE_CURRENT, label: "Aktuelle Position" },
-    { value: "1h", label: "Letzte Stunde" },
-    { value: "6h", label: "Letzte 6 Stunden" },
-    { value: "24h", label: "Letzte 24 Stunden" },
-    { value: "7d", label: "Letzte Woche" },
-    { value: "30d", label: "Letzte 30 Tage" },
-    { value: "custom", label: "Custom" },
+    { value: MAP_RANGE_CURRENT, label: t("map.range.current") },
+    { value: "1h", label: t("map.range.last1h") },
+    { value: "6h", label: t("map.range.last6h") },
+    { value: "24h", label: t("map.range.last24h") },
+    { value: "7d", label: t("map.range.last7d") },
+    { value: "30d", label: t("map.range.last30d") },
+    { value: "custom", label: t("map.range.custom") },
   ];
   ranges.forEach((entry) => {
     const id = `range-${entry.value}`;
@@ -998,10 +1025,10 @@ function buildMapPage() {
   rangeField.append(rangeLabel, rangePicker);
   const customDateWrap = document.createElement("div");
   customDateWrap.className = "map-custom-dates";
-  const fromField = createField({ label: "Von Datum", type: "date" });
+  const fromField = createField({ label: t("map.range.fromDate"), type: "date" });
   fromField.input.id = "map-from";
   fromField.input.value = localStorage.getItem("gpslogger.map.fromDate") || "";
-  const toField = createField({ label: "Bis Datum", type: "date" });
+  const toField = createField({ label: t("map.range.toDate"), type: "date" });
   toField.input.id = "map-to";
   toField.input.value = localStorage.getItem("gpslogger.map.toDate") || "";
   customDateWrap.append(fromField.field, toField.field);
@@ -1009,13 +1036,13 @@ function buildMapPage() {
   const footer = document.createElement("div");
   footer.className = "map-filters-footer";
   const statusBtn = createButton({
-    label: "Status",
+    label: t("status.title"),
     icon: "monitoring",
     onClick: () => openStatusModal(),
   });
   statusBtn.classList.add("btn-secondary", "map-settings-btn");
   const settingsBtn = createButton({
-    label: "Einstellungen",
+    label: t("settings.title"),
     icon: "settings",
     onClick: () => openSettingsModal(),
   });
@@ -1074,7 +1101,7 @@ function buildMapPage() {
 
   const overlay = page.querySelector("#map-overlay");
   const layerSwitch = createSwitch({
-    label: "Satellit",
+    label: t("map.satellite"),
     value: ui.mapMode === "satellite",
     onChange: (enabled) => setMapMode(enabled ? "satellite" : "street"),
   });
@@ -1346,7 +1373,7 @@ function drawPositions(positions, opts = {}) {
       opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
       className: "map-live-point map-live-point--pulse",
     });
-    marker.bindTooltip(escapeHtml(formatRelativeTimeDe(latest.timestamp)), {
+    marker.bindTooltip(escapeHtml(formatRelativeTime(latest.timestamp)), {
       permanent: true,
       direction: "top",
       offset: [0, -10],
@@ -1469,20 +1496,20 @@ function renderDeviceList() {
     leading.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">sensors</span>';
     const info = document.createElement("div");
     const status = state.deviceStatuses[device.id];
-    const seen = status?.last_seen ? new Date(status.last_seen).toLocaleString("de-DE") : "Nie";
+    const seen = status?.last_seen ? new Date(status.last_seen).toLocaleString(currentLanguage === "de" ? "de-DE" : "en-US") : t("devices.never");
     const position =
       status?.latitude != null && status?.longitude != null
         ? `${Number(status.latitude).toFixed(5)}, ${Number(status.longitude).toFixed(5)}`
-        : "Keine Position";
+        : t("devices.noPosition");
     const statBits = [];
-    if (status?.battery != null && status.battery !== "") statBits.push(`Akku: ${status.battery}`);
-    if (status?.speed != null) statBits.push(`Geschw.: ${status.speed}`);
+    if (status?.battery != null && status.battery !== "") statBits.push(`${t("devices.battery")}: ${status.battery}`);
+    if (status?.speed != null) statBits.push(`${t("devices.speed")}: ${status.speed}`);
     if (status?.provider) statBits.push(String(status.provider));
     if (status?.activity) statBits.push(String(status.activity));
     const statExtra = statBits.length
       ? `<br><small>${statBits.map((t) => escapeHtml(t)).join(" · ")}</small>`
       : "";
-    info.innerHTML = `<strong>${escapeHtml(device.name)}</strong><br><small>Last Seen: ${escapeHtml(seen)}</small><br><small>Pos: ${escapeHtml(position)}</small>${statExtra}`;
+    info.innerHTML = `<strong>${escapeHtml(device.name)}</strong><br><small>${escapeHtml(t("devices.lastSeen"))}: ${escapeHtml(seen)}</small><br><small>${escapeHtml(t("devices.position"))}: ${escapeHtml(position)}</small>${statExtra}`;
     const actions = document.createElement("div");
     actions.className = "ui-item-actions";
     const copyKeyBtn = createIconButton({
@@ -1620,22 +1647,22 @@ function buildSettingsPage() {
     <div class="settings-modal-backdrop" data-action="close-settings"></div>
     <div class="card settings-card settings-modal-card">
       <div class="settings-modal-head">
-        <h2><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>Einstellungen</span></h2>
-        <button type="button" class="icon-btn settings-modal-close" data-action="close-settings" aria-label="Einstellungen schließen">
+        <h2><span class="material-symbols-outlined" aria-hidden="true">settings</span><span>${t("settings.title")}</span></h2>
+        <button type="button" class="icon-btn settings-modal-close" data-action="close-settings" aria-label="${t("settings.close")}">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
       <section class="settings-section">
-        <h3>Theme</h3>
-        <div id="settings-theme" class="ui-form-grid"></div>
+        <h3>${t("settings.system.title")}</h3>
+        <div id="settings-system" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
-        <h3>Speicherung</h3>
+        <h3>${t("settings.storage.title")}</h3>
         <div id="settings-storage" class="ui-form-grid"></div>
       </section>
       <section class="settings-section">
         <div class="settings-section-head">
-          <h3>Weiterleitungen</h3>
+          <h3>${t("settings.forwardings.title")}</h3>
           <div id="forwarding-add-host"></div>
         </div>
         <div id="settings-forwarding" class="settings-forwarding-block">
@@ -1645,13 +1672,12 @@ function buildSettingsPage() {
       </section>
       <section class="settings-section">
         <div class="settings-section-head">
-          <h3>Geräte</h3>
+          <h3>${t("settings.devices.title")}</h3>
           <div id="devices-add-host"></div>
         </div>
         <div id="devices-list" class="list ui-list"></div>
       </section>
-      <section class="settings-section">
-        <h3>Aktionen</h3>
+      <section class="settings-section settings-actions-section">
         <div id="settings-actions" class="ui-form-grid"></div>
       </section>
       <div id="settings-save-footer" class="settings-save-footer"></div>
@@ -1668,28 +1694,31 @@ function buildSettingsPage() {
     if (event.target !== settingsBackdrop || !backdropPointerDown) return;
     closeSettingsModal();
   });
-  const themeHost = page.querySelector("#settings-theme");
+  const systemHost = page.querySelector("#settings-system");
   const storageHost = page.querySelector("#settings-storage");
   const forwardingAddHost = page.querySelector("#forwarding-add-host");
 
   const nasInterval = createField({
-    label: "NAS Intervall (Sekunden)",
+    label: t("settings.storage.nasInterval"),
     type: "number",
     value: String(state.settings.nas_interval_seconds || 60),
   });
-  const nasPath = createField({ label: "NAS Pfad", value: state.settings.nas_path || "nas_storage" });
-  const themeSelect = createField({ label: "Theme", type: "select" });
+  const nasPath = createField({ label: t("settings.storage.nasPath"), value: state.settings.nas_path || "nas_storage" });
+  const themeSelect = createField({ label: t("settings.system.theme"), type: "select" });
   themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
   themeSelect.input.value = state.settings.theme || "light";
+  const languageSelect = createField({ label: t("settings.system.language"), type: "select" });
+  languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
+  languageSelect.input.value = currentLanguage;
 
   const saveNowBtn = createButton({
-    label: "Jetzt GPS Informationen abspeichern",
+    label: t("settings.storage.saveNow"),
     icon: "save",
     onClick: async () => {
-      setButtonLoading(saveNowBtn, true, "Speichert...");
+      setButtonLoading(saveNowBtn, true, t("common.saving"));
       try {
         const res = await api("/api/save-now", { method: "POST" });
-        pushToast(ui.toastArea, `Gespeichert: ${res.result.saved_count}`, "success");
+        pushToast(ui.toastArea, t("settings.storage.savedCount", { count: res.result.saved_count }), "success");
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
       } finally {
@@ -1697,13 +1726,13 @@ function buildSettingsPage() {
       }
     },
   });
-  saveNowBtn.classList.add("btn-secondary");
+  saveNowBtn.classList.add("btn-secondary", "settings-form-button");
 
   const saveBtn = createButton({
-    label: "Einstellungen speichern",
+    label: t("settings.save"),
     icon: "check",
     onClick: async () => {
-      setButtonLoading(saveBtn, true, "Speichert...");
+      setButtonLoading(saveBtn, true, t("common.saving"));
       try {
         await persistMainSettingsFromUi();
       } catch (err) {
@@ -1719,32 +1748,45 @@ function buildSettingsPage() {
     applyTheme(themeSelect.input.value);
     ui.settingsDirty = true;
   });
+  languageSelect.input.addEventListener("change", async () => {
+    await loadLanguage(languageSelect.input.value);
+    buildMapPage();
+    initMapSidebarDrawer();
+    renderMapDeviceList();
+    await refreshMapData({ preserveView: true });
+    buildSettingsPage();
+    openSettingsModalUiOnly();
+    ui.settingsDirty = true;
+  });
   nasInterval.input.addEventListener("input", () => {
     ui.settingsDirty = true;
   });
   nasPath.input.addEventListener("input", () => {
     ui.settingsDirty = true;
   });
-  themeHost.append(themeSelect.field);
+  systemHost.append(themeSelect.field, languageSelect.field);
   storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
   const addFwBtn = createIconButton({
     icon: "add",
-    title: "Neue Weiterleitung hinzufügen",
+    title: t("settings.forwardings.add"),
     onClick: () => openForwardingModal(null),
   });
-  addFwBtn.setAttribute("aria-label", "Neue Weiterleitung hinzufügen");
+  addFwBtn.setAttribute("aria-label", t("settings.forwardings.add"));
   addFwBtn.classList.add("btn-primary");
   forwardingAddHost?.appendChild(addFwBtn);
   renderForwardingList();
   const actionsHost = page.querySelector("#settings-actions");
+  const actionsLabel = document.createElement("span");
+  actionsLabel.className = "settings-action-label";
+  actionsLabel.textContent = t("settings.actions.title");
   const restartBtn = createButton({
-    label: "GPSLogger neustarten",
+    label: t("settings.actions.restart"),
     icon: "refresh",
     onClick: () => runGpsloggerRestart(restartBtn),
   });
   restartBtn.id = "settings-restart-btn";
-  restartBtn.classList.add("btn-secondary");
-  actionsHost?.appendChild(restartBtn);
+  restartBtn.classList.add("btn-secondary", "settings-form-button");
+  actionsHost?.append(actionsLabel, restartBtn);
   const saveFooter = page.querySelector("#settings-save-footer");
   saveFooter?.appendChild(saveBtn);
   ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, saveBtn };

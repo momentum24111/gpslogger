@@ -1,0 +1,118 @@
+{
+  "language": {
+    "de": "German",
+    "en": "English"
+  },
+  "common": {
+    "na": "—",
+    "loading": "Loading...",
+    "saving": "Saving...",
+    "pleaseWait": "Please wait...",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save"
+  },
+  "errors": {
+    "api": "API error"
+  },
+  "app": {
+    "goToMap": "Go to map"
+  },
+  "map": {
+    "menuOpen": "Open menu",
+    "menuClose": "Close menu",
+    "noDevices": "No devices configured.",
+    "chooseColor": "Choose color",
+    "satellite": "Satellite",
+    "devices": {
+      "toggleAria": "Show or hide devices"
+    },
+    "range": {
+      "title": "Time range",
+      "current": "Current position",
+      "last1h": "Last hour",
+      "last6h": "Last 6 hours",
+      "last24h": "Last 24 hours",
+      "last7d": "Last week",
+      "last30d": "Last 30 days",
+      "custom": "Custom",
+      "fromDate": "From date",
+      "toDate": "To date"
+    },
+    "fit": {
+      "title": "Fit visible points",
+      "noVisiblePoints": "No visible points to fit."
+    }
+  },
+  "time": {
+    "justNow": "just now",
+    "minuteOne": "1 min ago",
+    "minuteMany": "{count} mins ago",
+    "hourOne": "1 hour ago",
+    "hourMany": "{count} hours ago",
+    "dayOne": "1 day ago",
+    "dayMany": "{count} days ago",
+    "weekOne": "1 week ago",
+    "weekMany": "{count} weeks ago",
+    "monthOne": "1 month ago",
+    "monthMany": "{count} months ago",
+    "yearOne": "1 year ago",
+    "yearMany": "{count} years ago"
+  },
+  "settings": {
+    "notLoaded": "Settings are not loaded.",
+    "saved": "Settings saved",
+    "unsaved": {
+      "title": "Unsaved changes",
+      "message": "There are unsaved changes in NAS path, interval, theme or language. Save or discard?",
+      "discard": "Discard settings"
+    },
+    "title": "Settings",
+    "close": "Close settings",
+    "save": "Save settings",
+    "system": {
+      "title": "System",
+      "theme": "Theme",
+      "language": "Language"
+    },
+    "storage": {
+      "title": "Storage",
+      "nasInterval": "NAS interval (seconds)",
+      "nasPath": "NAS path",
+      "saveNow": "Save GPS information now",
+      "savedCount": "Saved: {count}"
+    },
+    "forwardings": {
+      "title": "Forwardings",
+      "add": "Add forwarding"
+    },
+    "devices": {
+      "title": "Devices"
+    },
+    "actions": {
+      "title": "Actions",
+      "restart": "Restart GPS-Logger",
+      "restartInProgress": "GPSLogger is restarting..."
+    }
+  },
+  "status": {
+    "title": "Status"
+  },
+  "devices": {
+    "never": "Never",
+    "noPosition": "No position",
+    "lastSeen": "Last seen",
+    "position": "Position",
+    "battery": "Battery",
+    "speed": "Speed"
+  },
+  "toast": {
+    "close": "Close toast",
+    "variant": {
+      "success": "Success",
+      "error": "Error",
+      "info": "Info"
+    }
+  }
+}
