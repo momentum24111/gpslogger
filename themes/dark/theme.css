@@ -178,7 +178,7 @@
   --map-route-point-fill-opacity: 1;
   --map-route-point-stroke-opacity: 0.95;
   --map-route-point-stroke-width: 1;
-  --map-live-point-radius: 7;
+  --map-live-point-radius: 14;
   --map-live-point-border: #ffffff;
   --map-live-point-border-width: 2;
   --map-live-point-fill-opacity: 1;

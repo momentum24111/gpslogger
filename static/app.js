@@ -223,9 +223,14 @@ async function runGpsloggerRestart(button) {
 }
 
 async function bootstrap() {
+  await loadLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || DEFAULT_LANGUAGE);
   ui.toastArea = createToastArea();
   document.body.appendChild(ui.toastArea);
   initInkRipple();
+  const mapSidebarToggle = document.getElementById("map-sidebar-toggle");
+  const brandHomeButton = document.getElementById("brand-home");
+  if (mapSidebarToggle) mapSidebarToggle.setAttribute("aria-label", t("map.menuOpen"));
+  if (brandHomeButton) brandHomeButton.setAttribute("aria-label", t("app.goToMap"));
 
   await Promise.all([loadDevices(), loadDeviceStatuses(), loadSettings(), loadThemes(), loadSystemStatus(), loadForwardingErrors()]);
   applyTheme(state.settings.theme || "light");
