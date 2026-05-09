@@ -208,12 +208,19 @@
   --map-sidebar-toggle-active-hover-bg: color-mix(in srgb, var(--color-primary) 88%, var(--color-text));
   --map-sidebar-toggle-active-hover-fg: var(--primary-contrast, var(--color-surface));
   --map-drawer-backdrop-bg: var(--color-overlay);
+  --map-drawer-panel-bg: var(--color-surface);
   --map-drawer-panel-shadow: 0 8px 28px var(--color-shadow);
 }
 
 .card.ui-panel {
   background: var(--ui-panel-bg);
   box-shadow: var(--ui-panel-shadow);
+}
+
+@media (max-width: 899px) {
+  .map-filters-panel.card.ui-panel {
+    background: var(--map-drawer-panel-bg);
+  }
 }
 
 .map-color-swatch--0 {

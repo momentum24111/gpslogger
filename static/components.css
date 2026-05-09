@@ -1240,6 +1240,7 @@ main {
   padding-top: var(--spacing-sm);
   display: grid;
   gap: var(--spacing-sm);
+  flex: 0 0 auto;
 }
 
 .settings-save-footer .btn,
@@ -1712,7 +1713,9 @@ main {
   width: min(1100px, calc(100vw - 2rem));
   height: auto;
   max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   opacity: 0;
   transform: scale(var(--modal-enter-scale));
   transform-origin: center top;
@@ -1735,12 +1738,17 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-sm);
-  position: sticky;
-  top: 0;
+  flex: 0 0 auto;
   z-index: 2;
   background: var(--card-bg, var(--color-surface));
   padding-bottom: var(--spacing-sm);
   margin-bottom: var(--spacing-md);
+}
+
+.settings-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
 }
 
 

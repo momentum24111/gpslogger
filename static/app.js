@@ -1859,6 +1859,7 @@ function buildSettingsPage() {
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
+      <div class="settings-modal-body">
       <section class="settings-section">
         <h3 id="settings-system-title">${t("settings.system.title")}</h3>
         <div id="settings-system" class="ui-form-grid"></div>
@@ -1889,6 +1890,7 @@ function buildSettingsPage() {
       <section class="settings-section settings-actions-section">
         <div id="settings-actions" class="ui-form-grid"></div>
       </section>
+      </div>
       <div id="settings-save-footer" class="settings-save-footer"></div>
     </div>
   `;
