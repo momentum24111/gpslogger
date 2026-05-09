@@ -1222,6 +1222,7 @@ function buildMapPage() {
       customDateWrap.hidden = ui.mapRange !== "custom";
       setSelectedRangeCountStatus({ loading: true, count: null });
       refreshMapData({ fromField, toField });
+      if (isMobileMapLayout()) closeMapSidebarDrawer();
     });
     rangePicker.append(input, label);
   });

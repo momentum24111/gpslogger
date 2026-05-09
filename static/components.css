@@ -595,6 +595,7 @@ main {
 }
 
 .map-wrap .leaflet-control-zoom a {
+  display: flex;
   border-bottom: 1px solid var(--leaflet-control-border, var(--color-border));
 }
 
