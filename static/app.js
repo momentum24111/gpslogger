@@ -1242,14 +1242,20 @@ function buildMapPage() {
   const statusBtn = createButton({
     label: t("status.title"),
     icon: "monitoring",
-    onClick: () => openStatusModal(),
+    onClick: () => {
+      if (isMobileMapLayout()) closeMapSidebarDrawer();
+      openStatusModal();
+    },
   });
   statusBtn.id = "map-status-btn";
   statusBtn.classList.add("btn-secondary", "map-settings-btn");
   const settingsBtn = createButton({
     label: t("settings.title"),
     icon: "settings",
-    onClick: () => openSettingsModal(),
+    onClick: () => {
+      if (isMobileMapLayout()) closeMapSidebarDrawer();
+      openSettingsModal();
+    },
   });
   settingsBtn.id = "map-settings-btn";
   settingsBtn.classList.add("btn-secondary", "map-settings-btn");

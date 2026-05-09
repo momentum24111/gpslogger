@@ -595,6 +595,11 @@ main {
 }
 
 .map-wrap .leaflet-control-zoom a {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.map-wrap .leaflet-control-zoom a {
   display: flex;
   border-bottom: 1px solid var(--leaflet-control-border, var(--color-border));
 }
