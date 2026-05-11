@@ -106,6 +106,36 @@ def build_openapi_spec() -> dict:
                     },
                 }
             },
+            "/api/storage/status": {
+                "get": {
+                    "tags": ["Einstellungen"],
+                    "summary": "NDJSON-Speicherstatus je Gerät",
+                    "description": (
+                        "Optionaler Query-Parameter `nas_path` (URL-kodiert): aktueller Pfad aus der UI; "
+                        "ohne Parameter wird der gespeicherte `nas_path` aus den Einstellungen verwendet."
+                    ),
+                    "operationId": "getStorageStatus",
+                    "parameters": [
+                        {
+                            "name": "nas_path",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string"},
+                            "description": "Absoluter Speicherordner zur Vorschau (kann von den persistierten Settings abweichen).",
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Übersicht inkl. Pfadvalidierung und Zähler",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/StorageStatusResponse"}
+                                }
+                            },
+                        }
+                    },
+                }
+            },
             "/api/devices": {
                 "get": {
                     "tags": ["Geräte"],
@@ -482,14 +512,28 @@ def build_openapi_spec() -> dict:
                                     "schema": {"$ref": "#/components/schemas/SettingsResponse"}
                                 }
                             },
-                        }
+                        },
+                        "400": {
+                            "description": "Ungültige Einstellungen (z. B. nicht absoluter Speicherpfad)",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {"type": "string"},
+                                            "error_key": {"type": "string"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
                     },
                 },
             },
             "/api/save-now": {
                 "post": {
                     "tags": ["Einstellungen"],
-                    "summary": "Ausstehende Daten sofort auf das NAS schreiben",
+                    "summary": "Ausstehende Positionen als NDJSON in den konfigurierten Ordner schreiben",
                     "operationId": "saveNow",
                     "responses": {
                         "200": {
@@ -506,15 +550,16 @@ def build_openapi_spec() -> dict:
                                 }
                             },
                         },
-                        "500": {
-                            "description": "NAS-Fehler",
+                        "400": {
+                            "description": "Pfad ungültig oder nicht beschreibbar; es wurde nichts geschrieben",
                             "content": {
                                 "application/json": {
                                     "schema": {
                                         "type": "object",
                                         "properties": {
                                             "ok": {"type": "boolean", "example": False},
-                                            "error": {"type": "string"},
+                                            "error_key": {"type": "string"},
+                                            "result": {"type": "object", "additionalProperties": True},
                                         },
                                     }
                                 }
@@ -922,6 +967,17 @@ def build_openapi_spec() -> dict:
                     "type": "object",
                     "properties": {"status": {"type": "object", "additionalProperties": True}},
                     "required": ["status"],
+                },
+                "StorageStatusResponse": {
+                    "type": "object",
+                    "properties": {
+                        "overview": {
+                            "type": "object",
+                            "additionalProperties": True,
+                            "description": "Pfadstatus, Geräteliste mit Dateimetadaten und Zählern",
+                        }
+                    },
+                    "required": ["overview"],
                 },
             },
         },

@@ -1,12 +1,23 @@
+import errno
 import json
 import threading
 import time
 import uuid
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import parse as urlparse
 
+from .gps_storage import (
+    ERR_PATH_EMPTY,
+    ERR_WRITE_FAILED,
+    count_ndjson_lines,
+    device_ndjson_filename,
+    export_line_for_item,
+    validate_absolute_writable_directory,
+    validate_nas_path_string_for_settings,
+)
 from .utils import ensure_dir, read_json, secure_api_key, stable_device_id, utc_now_iso, write_json
 
 DEVICE_DRAFT_TTL_SEC = 900
@@ -31,10 +42,18 @@ FORWARDING_BODY_SOURCES = {
 
 DEFAULT_SETTINGS = {
     "nas_interval_seconds": 60,
-    "nas_path": "nas_storage",
+    "nas_path": "",
     "forwardings": [],
     "theme": "light",
 }
+
+
+class ConfigFieldError(ValueError):
+    """Ungültige Einstellungen mit maschinenlesbarem i18n-Schlüssel."""
+
+    def __init__(self, error_key: str):
+        self.error_key = error_key
+        super().__init__(error_key)
 
 
 def is_http_url(value: str) -> bool:
@@ -57,6 +76,7 @@ class AppState:
         self.pending_path = self.data_dir / "pending_nas.json"
         self.status_path = self.data_dir / "device_statuses.json"
         self.forward_log_path = self.data_dir / "forwarding_errors.log"
+        self.export_meta_path = self.data_dir / "nas_export_meta.json"
 
         self._lock = threading.RLock()
         self.devices: list[dict[str, Any]] = read_json(self.devices_path, [])
@@ -72,6 +92,7 @@ class AppState:
 
         self._migrate_settings_forwardings()
         self._migrate_devices_map_color()
+        self._migrate_legacy_nas_path_default()
         self._persist_devices()
         self._persist_settings()
         self._persist_pending()
@@ -100,6 +121,12 @@ class AppState:
                 changed = True
         if changed:
             self._persist_devices()
+
+    def _migrate_legacy_nas_path_default(self) -> None:
+        """Alter Platzhalter-Default `nas_storage` entfernen."""
+        if str(self.settings.get("nas_path", "")).strip() == "nas_storage":
+            self.settings["nas_path"] = ""
+            self._persist_settings()
 
     @staticmethod
     def normalize_map_color_index(raw: Any) -> int:
@@ -486,7 +513,10 @@ class AppState:
 
             if "nas_path" in payload:
                 nas_path = str(payload["nas_path"]).strip()
-                self.settings["nas_path"] = nas_path or DEFAULT_SETTINGS["nas_path"]
+                err_key = validate_nas_path_string_for_settings(nas_path)
+                if err_key:
+                    raise ConfigFieldError(err_key)
+                self.settings["nas_path"] = nas_path
 
             if "theme" in payload:
                 theme = str(payload["theme"]).strip()
@@ -610,6 +640,148 @@ class AppState:
                     return dict(self._normalize_forwarding_entry(f))
             return None
 
+    def _read_export_meta(self) -> dict[str, Any]:
+        raw = read_json(self.export_meta_path, {})
+        if not isinstance(raw, dict):
+            return {"device_last_export_at": {}}
+        d = raw.get("device_last_export_at")
+        if not isinstance(d, dict):
+            d = {}
+        cleaned = {str(k): str(v) for k, v in d.items() if k is not None}
+        return {"device_last_export_at": cleaned}
+
+    def _write_export_meta(self, meta: dict[str, Any]) -> None:
+        write_json(self.export_meta_path, meta)
+
+    @staticmethod
+    def _restore_export_file(path: Path, existed_before: bool, original_size: int) -> None:
+        if not path.exists():
+            return
+        if not existed_before:
+            path.unlink(missing_ok=True)
+            return
+        with path.open("r+b") as handle:
+            handle.truncate(original_size)
+
+    def get_storage_overview(self, nas_path_override: str | None = None) -> dict[str, Any]:
+        """Status für die UI: Pfadprüfung, Dateien, Zähler pending/gespeichert pro Gerät."""
+        with self._lock:
+            raw_path = str(
+                nas_path_override if nas_path_override is not None else (self.settings.get("nas_path") or "")
+            ).strip()
+            pending_by_id: Counter[str] = Counter()
+            for item in self.pending_nas:
+                did = str(item.get("device_id", "")).strip()
+                if did:
+                    pending_by_id[did] += 1
+            meta = self._read_export_meta()
+            last_export_map: dict[str, str] = dict(meta.get("device_last_export_at") or {})
+
+            devices_out: list[dict[str, Any]] = []
+            path_error_key: str | None = None
+            path_valid = False
+            nas_root_resolved = ""
+
+            if not raw_path:
+                path_error_key = ERR_PATH_EMPTY
+            else:
+                try:
+                    nas_root = Path(raw_path)
+                except Exception:
+                    path_error_key = "settings.storage.error.invalidPath"
+                    nas_root = None
+                else:
+                    if not nas_root.is_absolute():
+                        path_error_key = "settings.storage.error.pathNotAbsolute"
+                    else:
+                        v_err = validate_absolute_writable_directory(nas_root)
+                        if v_err:
+                            path_error_key = v_err
+                        else:
+                            path_valid = True
+                            nas_root_resolved = str(nas_root.resolve())
+
+            for device in self.devices:
+                if not isinstance(device, dict):
+                    continue
+                did = str(device.get("id", "")).strip()
+                name = str(device.get("name", "") or "device")
+                if not did:
+                    continue
+                fname = device_ndjson_filename(name, did)
+                file_path = ""
+                stored_lines = 0
+                file_exists = False
+                file_status = "would_create"
+                if path_valid and nas_root_resolved:
+                    try:
+                        p = Path(nas_root_resolved) / fname
+                        file_path = str(p.resolve())
+                        if p.exists() and p.is_file():
+                            file_exists = True
+                            file_status = "exists"
+                            stored_lines = count_ndjson_lines(p)
+                        elif p.exists() and not p.is_file():
+                            file_status = "blocked"
+                    except OSError:
+                        file_status = "blocked"
+
+                devices_out.append(
+                    {
+                        "device_id": did,
+                        "device_name": name,
+                        "ndjson_filename": fname,
+                        "file_path": file_path,
+                        "file_exists": file_exists,
+                        "file_status": file_status,
+                        "stored_line_count": stored_lines,
+                        "pending_unsaved_count": int(pending_by_id.get(did, 0)),
+                        "last_export_at": last_export_map.get(did),
+                    }
+                )
+
+            # Pending für unbekannte Geräte-IDs (z. B. nach Löschen)
+            known_ids = {str(d.get("id", "")).strip() for d in self.devices if isinstance(d, dict)}
+            for did, cnt in pending_by_id.items():
+                if did in known_ids or cnt <= 0:
+                    continue
+                fname = device_ndjson_filename("device", did)
+                file_path = ""
+                stored_lines = 0
+                file_exists = False
+                file_status = "would_create"
+                if path_valid and nas_root_resolved:
+                    try:
+                        p = Path(nas_root_resolved) / fname
+                        file_path = str(p.resolve())
+                        if p.exists() and p.is_file():
+                            file_exists = True
+                            file_status = "exists"
+                            stored_lines = count_ndjson_lines(p)
+                    except OSError:
+                        file_status = "blocked"
+                devices_out.append(
+                    {
+                        "device_id": did,
+                        "device_name": did,
+                        "ndjson_filename": fname,
+                        "file_path": file_path,
+                        "file_exists": file_exists,
+                        "file_status": file_status,
+                        "stored_line_count": stored_lines,
+                        "pending_unsaved_count": int(cnt),
+                        "last_export_at": last_export_map.get(did),
+                    }
+                )
+
+            return {
+                "nas_path_effective": raw_path,
+                "nas_path_resolved": nas_root_resolved,
+                "path_valid": path_valid,
+                "path_error_key": path_error_key,
+                "devices": devices_out,
+            }
+
     def store_gps_request(self, payload: dict[str, Any]) -> None:
         with self._lock:
             self._append_gps_line(payload)
@@ -643,31 +815,110 @@ class AppState:
             pending = list(self.pending_nas)
             if not pending:
                 self.mark_nas_run(saved_count=0, error=None)
-                return {"saved_count": 0}
+                return {"ok": True, "saved_count": 0, "by_device": {}, "nas_path_resolved": ""}
 
-            nas_root = Path(self.settings["nas_path"])
-            if not nas_root.is_absolute():
-                nas_root = self.root / nas_root
-            ensure_dir(nas_root)
+            raw_path = str(self.settings.get("nas_path") or "").strip()
+            if not raw_path:
+                self.mark_nas_run(0, error=ERR_PATH_EMPTY)
+                return {"ok": False, "saved_count": 0, "error_key": ERR_PATH_EMPTY, "by_device": {}}
 
-            for item in pending:
-                received = item.get("received_at", utc_now_iso())
+            try:
+                nas_root = Path(raw_path)
+            except Exception:
+                self.mark_nas_run(0, error="settings.storage.error.invalidPath")
+                return {
+                    "ok": False,
+                    "saved_count": 0,
+                    "error_key": "settings.storage.error.invalidPath",
+                    "by_device": {},
+                }
+
+            v_err = validate_absolute_writable_directory(nas_root)
+            if v_err:
+                self.mark_nas_run(0, error=v_err)
+                return {"ok": False, "saved_count": 0, "error_key": v_err, "by_device": {}}
+
+            valid_pending = [i for i in pending if str(i.get("device_id", "")).strip()]
+            invalid_pending = [i for i in pending if not str(i.get("device_id", "")).strip()]
+
+            if not valid_pending:
+                self.pending_nas = invalid_pending
+                self._persist_pending()
+                self.mark_nas_run(0, error=None)
+                return {"ok": True, "saved_count": 0, "by_device": {}, "nas_path_resolved": str(nas_root.resolve())}
+
+            groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for item in valid_pending:
+                did = str(item.get("device_id", "")).strip()
+                groups[did].append(item)
+
+            lines_by_path: dict[Path, str] = {}
+            by_device_counts: dict[str, int] = {}
+            for did, items in groups.items():
+                name = str(items[0].get("device_name") or "device")
+                fname = device_ndjson_filename(name, did)
+                path = nas_root / fname
                 try:
-                    parsed = datetime.fromisoformat(received.replace("Z", "+00:00"))
-                except ValueError:
-                    parsed = datetime.now(timezone.utc)
-                date_part = parsed.strftime("%Y-%m-%d")
-                device_name = item.get("device_name", "unknown").replace("/", "_")
-                device_dir = nas_root / date_part / device_name
-                ensure_dir(device_dir)
-                target = device_dir / "gps.ndjson"
-                with target.open("a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+                    if path.resolve().parent != nas_root.resolve():
+                        self.mark_nas_run(0, error="settings.storage.error.invalidPath")
+                        return {
+                            "ok": False,
+                            "saved_count": 0,
+                            "error_key": "settings.storage.error.invalidPath",
+                            "by_device": {},
+                        }
+                except Exception:
+                    self.mark_nas_run(0, error="settings.storage.error.invalidPath")
+                    return {
+                        "ok": False,
+                        "saved_count": 0,
+                        "error_key": "settings.storage.error.invalidPath",
+                        "by_device": {},
+                    }
+                blob = "".join(export_line_for_item(it) for it in items)
+                lines_by_path[path] = lines_by_path.get(path, "") + blob
+                by_device_counts[did] = len(items)
 
-            self.pending_nas = []
+            snapshots: dict[Path, tuple[bool, int]] = {}
+            for path in lines_by_path:
+                existed = path.exists()
+                size = path.stat().st_size if existed else 0
+                snapshots[path] = (existed, size)
+
+            try:
+                for path, blob in lines_by_path.items():
+                    with path.open("a", encoding="utf-8") as handle:
+                        handle.write(blob)
+            except OSError as exc:
+                for path, (existed, orig_size) in snapshots.items():
+                    self._restore_export_file(path, existed, orig_size)
+                err_key = ERR_WRITE_FAILED
+                if exc.errno in (errno.EACCES, errno.EPERM):
+                    err_key = "settings.storage.error.permissionDenied"
+                elif exc.errno == errno.ENOSPC:
+                    err_key = "settings.storage.error.noSpace"
+                self.mark_nas_run(0, error=err_key)
+                return {"ok": False, "saved_count": 0, "error_key": err_key, "by_device": {}}
+
+            self.pending_nas = invalid_pending
             self._persist_pending()
-            self.mark_nas_run(saved_count=len(pending), error=None)
-            return {"saved_count": len(pending), "nas_path": str(nas_root)}
+
+            meta = self._read_export_meta()
+            inner = dict(meta.get("device_last_export_at") or {})
+            now = utc_now_iso()
+            for did in groups:
+                inner[did] = now
+            meta["device_last_export_at"] = inner
+            self._write_export_meta(meta)
+
+            total_written = sum(by_device_counts.values())
+            self.mark_nas_run(total_written, error=None)
+            return {
+                "ok": True,
+                "saved_count": total_written,
+                "by_device": by_device_counts,
+                "nas_path_resolved": str(nas_root.resolve()),
+            }
 
     def query_positions(
         self,

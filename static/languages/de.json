@@ -96,8 +96,39 @@
       "title": "Speicherung",
       "nasInterval": "Speicherintervall (Sekunden)",
       "nasPath": "Speicherpfad",
+      "pathHint": "Nur der Teil nach dem führenden Schrägstrich ist editierbar. Es wird immer ein absoluter Unix-Pfad gespeichert (beginnt mit /).",
       "saveNow": "GPS-Informationen abspeichern",
-      "savedCount": "Gespeichert: {count}"
+      "savedCount": "Gespeichert: {count}",
+      "saveToast": "{count} Position(en) wurden als NDJSON gespeichert.",
+      "saveNothingPending": "Keine ausstehenden Positionen zum Speichern.",
+      "error": {
+        "intervalMin": "Intervall muss mindestens 5 Sekunden sein.",
+        "formCheck": "Bitte Eingaben prüfen.",
+        "pathEmpty": "Speicherpfad fehlt. Bitte einen absoluten Pfad eingeben.",
+        "pathNotAbsolute": "Der Speicherpfad muss absolut sein (beginnt mit /).",
+        "pathNotFound": "Der Speicherpfad existiert nicht.",
+        "notADirectory": "Der Speicherpfad ist kein Verzeichnis.",
+        "permissionDenied": "Keine Schreibrechte im Speicherordner.",
+        "invalidPath": "Der Speicherpfad ist ungültig.",
+        "writeTestFailed": "Schreibtest im Speicherordner ist fehlgeschlagen.",
+        "writeFailed": "Schreiben der NDJSON-Datei ist fehlgeschlagen.",
+        "noSpace": "Nicht genug Speicherplatz zum Schreiben."
+      },
+      "overview": {
+        "title": "NDJSON-Export pro Gerät",
+        "refreshTitle": "Status neu laden",
+        "loading": "Lade Status…",
+        "emptyDevices": "Keine Geräte angelegt.",
+        "pathLabel": "Zieldatei",
+        "stored": "In Datei",
+        "pending": "Noch nicht gespeichert",
+        "lastSave": "Letzte Speicherung",
+        "fileStatus": {
+          "exists": "Datei vorhanden",
+          "wouldCreate": "Würde neu angelegt",
+          "blocked": "Pfad blockiert"
+        }
+      }
     },
     "forwardings": {
       "title": "Weiterleitungen",

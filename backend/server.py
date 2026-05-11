@@ -12,7 +12,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from .openapi_spec import build_openapi_spec
-from .state import AppState
+from .state import AppState, ConfigFieldError
 from .utils import utc_now_iso
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -710,6 +710,12 @@ class Handler(BaseHTTPRequestHandler):
             runtime["forward_queue_size"] = forward_queue.qsize()
             runtime["uptime_seconds"] = int(time.time() - STARTED_AT)
             return json_response(self, {"status": runtime})
+        if route == "/api/storage/status":
+            nas_path_override = None
+            if "nas_path" in query:
+                nas_path_override = str((query.get("nas_path") or [""])[0] or "").strip()
+            overview = state.get_storage_overview(nas_path_override=nas_path_override)
+            return json_response(self, {"overview": overview})
         if route == "/api/forwarding/errors":
             query_limit = (query.get("limit", ["50"])[0] or "50")
             try:
@@ -967,13 +973,19 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if route == "/api/save-now":
-            try:
-                with save_lock:
-                    result = state.flush_pending_to_nas()
-                return json_response(self, {"ok": True, "result": result})
-            except Exception as exc:
-                state.mark_nas_run(saved_count=0, error=str(exc))
-                return json_response(self, {"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            with save_lock:
+                result = state.flush_pending_to_nas()
+            if not result.get("ok", True):
+                return json_response(
+                    self,
+                    {
+                        "ok": False,
+                        "error_key": result.get("error_key"),
+                        "result": result,
+                    },
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return json_response(self, {"ok": True, "result": result})
 
         if route == "/api/admin/restart":
             schedule_restart_via_webhook()
@@ -1060,7 +1072,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/api/settings":
             payload = self._read_json_body()
-            settings = state.update_settings(payload)
+            try:
+                settings = state.update_settings(payload)
+            except ConfigFieldError as exc:
+                return json_response(
+                    self,
+                    {"error": exc.error_key, "error_key": exc.error_key},
+                    HTTPStatus.BAD_REQUEST,
+                )
             return json_response(self, {"settings": settings})
 
         self.send_error(HTTPStatus.NOT_FOUND)

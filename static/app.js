@@ -24,6 +24,32 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+/** Baut aus dem editierbaren Rest (ohne führendes /) einen absoluten Unix-Pfad. */
+function buildAbsoluteNasPathFromInfix(infixRaw) {
+  const body = String(infixRaw || "")
+    .trim()
+    .replace(/^\/+/u, "");
+  return body ? `/${body}` : "";
+}
+
+/** Zeigt im Eingabefeld nur den Teil ohne führendes /. */
+function nasPathSettingsToInfix(absPath) {
+  const p = String(absPath || "").trim();
+  if (!p) return "";
+  return p.startsWith("/") ? p.slice(1) : p;
+}
+
+let storageOverviewDebounceTimer = null;
+
+function scheduleStorageOverviewRefresh() {
+  if (!ui.settingsModalOpen) return;
+  if (storageOverviewDebounceTimer) clearTimeout(storageOverviewDebounceTimer);
+  storageOverviewDebounceTimer = window.setTimeout(() => {
+    storageOverviewDebounceTimer = null;
+    refreshStorageOverview({ silent: true }).catch(() => {});
+  }, 400);
+}
+
 const LANGUAGE_STORAGE_KEY = "gpslogger.language";
 const DEFAULT_LANGUAGE = "de";
 const SUPPORTED_LANGUAGES = ["de", "en"];
@@ -186,9 +212,23 @@ function updateVisibleTexts() {
   if (statusForwardingTitle) statusForwardingTitle.textContent = t("status.forwardingErrors.title");
   if (statusRecentGpsTitle) statusRecentGpsTitle.textContent = t("status.recentGps.title");
 
+  const storageOverviewTitleEl = document.getElementById("settings-storage-overview-title");
+  if (storageOverviewTitleEl) storageOverviewTitleEl.textContent = t("settings.storage.overview.title");
+  const storageOverviewRefreshEl = document.getElementById("settings-storage-overview-refresh");
+  if (storageOverviewRefreshEl) {
+    storageOverviewRefreshEl.title = t("settings.storage.overview.refreshTitle");
+    storageOverviewRefreshEl.setAttribute("aria-label", t("settings.storage.overview.refreshTitle"));
+  }
+  const storagePathHintEl = document.getElementById("settings-storage-path-hint");
+  if (storagePathHintEl) storagePathHintEl.textContent = t("settings.storage.pathHint");
+
   renderSystemStatus(ui.statusModalHost?.querySelector("#status-system-status") || null);
   renderForwardingErrors(ui.statusModalHost?.querySelector("#status-forwarding-errors") || null);
   renderRecentGps(ui.statusModalHost?.querySelector("#status-recent-gps") || null);
+
+  if (ui.settingsModalOpen) {
+    refreshStorageOverview({ silent: true }).catch(() => {});
+  }
 }
 
 async function loadLanguage(language) {
@@ -309,7 +349,12 @@ async function api(url, options = {}) {
     ...options,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || t("errors.api"));
+  if (!res.ok) {
+    const key = data.error_key || null;
+    const err = new Error(key ? t(key) : data.error || t("errors.api"));
+    err.errorKey = key;
+    throw err;
+  }
   return data;
 }
 
@@ -749,6 +794,7 @@ function connectPositionStream() {
       const msg = JSON.parse(ev.data);
       if (msg.type === "position") {
         refreshMapData({ preserveView: true });
+        scheduleStorageOverviewRefresh();
       }
     } catch (_e) {
       /* ignore */
@@ -1071,22 +1117,32 @@ async function persistMainSettingsFromUi() {
   }
   const { nasInterval, nasPath, themeSelect } = refs;
   setFieldState(nasInterval, "default", "");
+  setFieldState(nasPath, "default", "");
   const intervalValue = Number(nasInterval.input.value || 60);
   if (!Number.isFinite(intervalValue) || intervalValue < 5) {
-    setFieldState(nasInterval, "error", "Intervall muss mindestens 5 Sekunden sein.");
-    throw new Error("Bitte Eingaben prüfen");
+    setFieldState(nasInterval, "error", t("settings.storage.error.intervalMin"));
+    throw new Error(t("settings.storage.error.formCheck"));
   }
   const payload = {
     nas_interval_seconds: intervalValue,
-    nas_path: nasPath.input.value.trim(),
+    nas_path: buildAbsoluteNasPathFromInfix(nasPath.input.value),
     theme: themeSelect.input.value,
   };
-  const data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+  let data;
+  try {
+    data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+  } catch (err) {
+    setFieldState(nasPath, "error", err.message);
+    throw err;
+  }
   state.settings = data.settings;
   applyTheme(state.settings.theme);
   setFieldState(nasInterval, "success", "");
+  nasPath.input.value = nasPathSettingsToInfix(state.settings.nas_path || "");
+  setFieldState(nasPath, "default", "");
   pushToast(ui.toastArea, t("settings.saved"), "success");
   ui.settingsDirty = false;
+  refreshStorageOverview({ silent: true }).catch(() => {});
 }
 
 async function discardSettingsAndClose() {
@@ -1686,6 +1742,7 @@ async function openDeviceEditorModal(device = null) {
       await loadDeviceStatuses();
       renderDeviceList();
       renderMapDeviceList();
+      if (ui.settingsModalOpen) refreshStorageOverview({ silent: true }).catch(() => {});
       pushToast(ui.toastArea, isEdit ? "Gerät aktualisiert" : "Gerät angelegt", "success");
       modal.close();
     } catch (err) {
@@ -1826,6 +1883,7 @@ function openDeleteModal(device) {
         renderDeviceList();
         renderMapDeviceList();
         await refreshMapData({ preserveView: true });
+        if (ui.settingsModalOpen) refreshStorageOverview({ silent: true }).catch(() => {});
         pushToast(ui.toastArea, "Gerät gelöscht", "success");
       } catch (err) {
         pushToast(ui.toastArea, err.message, "error");
@@ -1851,6 +1909,64 @@ function openRotateKeyModal(device) {
       }
     },
   });
+}
+
+function renderStorageOverviewBody(bodyEl, overview) {
+  if (!bodyEl || !overview) return;
+  const devices = Array.isArray(overview.devices) ? overview.devices : [];
+  const banner =
+    overview.path_error_key && !overview.path_valid
+      ? `<div class="storage-overview-banner">${escapeHtml(t(overview.path_error_key))}</div>`
+      : "";
+  if (devices.length === 0) {
+    bodyEl.innerHTML = `${banner}<p class="storage-overview-meta">${escapeHtml(t("settings.storage.overview.emptyDevices"))}</p>`;
+    return;
+  }
+  const rows = devices
+    .map((d) => {
+      const pathText =
+        d.file_path ||
+        (overview.nas_path_resolved ? `${overview.nas_path_resolved}/${d.ndjson_filename}` : d.ndjson_filename || "");
+      const statusKey = `settings.storage.overview.fileStatus.${d.file_status || "wouldCreate"}`;
+      const statusText = t(statusKey, {}, d.file_status || "");
+      const last = d.last_export_at
+        ? escapeHtml(new Date(d.last_export_at).toLocaleString(currentLanguage === "de" ? "de-DE" : "en-US"))
+        : escapeHtml(t("common.na"));
+      return `<div class="storage-overview-row">
+        <div class="storage-overview-row-head">
+          <span class="storage-overview-device-name">${escapeHtml(d.device_name || d.device_id)}</span>
+          <span class="storage-overview-meta">${escapeHtml(statusText)}</span>
+        </div>
+        <div class="storage-overview-meta"><span>${escapeHtml(t("settings.storage.overview.pathLabel"))}:</span> ${escapeHtml(pathText)}</div>
+        <div class="storage-overview-counts">
+          <span>${escapeHtml(t("settings.storage.overview.stored"))}: <strong>${Number(d.stored_line_count ?? 0)}</strong></span>
+          <span>${escapeHtml(t("settings.storage.overview.pending"))}: <strong>${Number(d.pending_unsaved_count ?? 0)}</strong></span>
+          <span>${escapeHtml(t("settings.storage.overview.lastSave"))}: ${last}</span>
+        </div>
+      </div>`;
+    })
+    .join("");
+  bodyEl.innerHTML = `${banner}${rows}`;
+}
+
+async function refreshStorageOverview({ silent = false, manual = false } = {}) {
+  const wrap = document.getElementById("settings-storage-overview");
+  const bodyEl = document.getElementById("settings-storage-overview-body");
+  if (!wrap || !bodyEl || !ui.settingsFormRefs?.nasPath?.input) return;
+  if (manual) wrap.classList.add("is-loading");
+  try {
+    const full = buildAbsoluteNasPathFromInfix(ui.settingsFormRefs.nasPath.input.value);
+    const qs = new URLSearchParams();
+    qs.set("nas_path", full);
+    const data = await api(`/api/storage/status?${qs.toString()}`);
+    renderStorageOverviewBody(bodyEl, data.overview);
+  } catch (err) {
+    const msg = err?.message || t("errors.api");
+    bodyEl.innerHTML = `<p class="storage-overview-error">${escapeHtml(msg)}</p>`;
+    if (!silent) pushToast(ui.toastArea, msg, "error");
+  } finally {
+    wrap.classList.remove("is-loading");
+  }
 }
 
 function buildSettingsPage() {
@@ -1921,7 +2037,25 @@ function buildSettingsPage() {
     type: "number",
     value: String(state.settings.nas_interval_seconds || 60),
   });
-  const nasPath = createField({ label: t("settings.storage.nasPath"), value: state.settings.nas_path || "nas_storage" });
+  const nasPath = createField({
+    label: t("settings.storage.nasPath"),
+    value: nasPathSettingsToInfix(state.settings.nas_path || ""),
+  });
+  const nasPathInputEl = nasPath.input;
+  const nasPathWrapEl = document.createElement("div");
+  nasPathWrapEl.className = "abs-path-input-wrap";
+  const nasPathPrefixEl = document.createElement("span");
+  nasPathPrefixEl.className = "abs-path-prefix";
+  nasPathPrefixEl.textContent = "/";
+  nasPathPrefixEl.setAttribute("aria-hidden", "true");
+  nasPath.field.replaceChild(nasPathWrapEl, nasPathInputEl);
+  nasPathWrapEl.append(nasPathPrefixEl, nasPathInputEl);
+  nasPath.input = nasPathInputEl;
+  const nasPathHint = document.createElement("p");
+  nasPathHint.className = "settings-storage-path-hint";
+  nasPathHint.id = "settings-storage-path-hint";
+  nasPathHint.textContent = t("settings.storage.pathHint");
+  nasPath.field.appendChild(nasPathHint);
   const themeSelect = createField({ label: t("settings.system.theme"), type: "select" });
   themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
   themeSelect.input.value = state.settings.theme || "light";
@@ -1929,16 +2063,47 @@ function buildSettingsPage() {
   languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
   languageSelect.input.value = currentLanguage;
 
+  const storageOverviewWrap = document.createElement("div");
+  storageOverviewWrap.className = "settings-storage-overview";
+  storageOverviewWrap.id = "settings-storage-overview";
+  const storageOverviewHead = document.createElement("div");
+  storageOverviewHead.className = "settings-storage-overview-head";
+  const storageOverviewTitle = document.createElement("span");
+  storageOverviewTitle.className = "storage-overview-title";
+  storageOverviewTitle.id = "settings-storage-overview-title";
+  storageOverviewTitle.textContent = t("settings.storage.overview.title");
+  const storageOverviewRefreshBtn = createIconButton({
+    icon: "refresh",
+    title: t("settings.storage.overview.refreshTitle"),
+    onClick: () => refreshStorageOverview({ manual: true }),
+  });
+  storageOverviewRefreshBtn.id = "settings-storage-overview-refresh";
+  storageOverviewRefreshBtn.setAttribute("aria-label", t("settings.storage.overview.refreshTitle"));
+  storageOverviewHead.append(storageOverviewTitle, storageOverviewRefreshBtn);
+  const storageOverviewBody = document.createElement("div");
+  storageOverviewBody.className = "settings-storage-overview-body";
+  storageOverviewBody.id = "settings-storage-overview-body";
+  storageOverviewWrap.append(storageOverviewHead, storageOverviewBody);
+
   const saveNowBtn = createButton({
     label: t("settings.storage.saveNow"),
     icon: "save",
     onClick: async () => {
+      setFieldState(nasPath, "default", "");
       setButtonLoading(saveNowBtn, true, t("common.saving"));
       try {
         const res = await api("/api/save-now", { method: "POST" });
-        pushToast(ui.toastArea, t("settings.storage.savedCount", { count: res.result.saved_count }), "success");
+        const r = res.result || {};
+        if (Number(r.saved_count || 0) === 0) {
+          pushToast(ui.toastArea, t("settings.storage.saveNothingPending"), "info");
+        } else {
+          pushToast(ui.toastArea, t("settings.storage.saveToast", { count: r.saved_count }), "success");
+        }
+        await refreshStorageOverview({ silent: true });
       } catch (err) {
-        pushToast(ui.toastArea, err.message, "error");
+        const msg = err?.message || t("errors.api");
+        setFieldState(nasPath, "error", msg);
+        pushToast(ui.toastArea, msg, "error");
       } finally {
         setButtonLoading(saveNowBtn, false);
       }
@@ -1986,9 +2151,10 @@ function buildSettingsPage() {
   });
   nasPath.input.addEventListener("input", () => {
     ui.settingsDirty = true;
+    scheduleStorageOverviewRefresh();
   });
   systemHost.append(themeSelect.field, languageSelect.field);
-  storageHost.append(nasInterval.field, nasPath.field, saveNowBtn);
+  storageHost.append(nasInterval.field, nasPath.field, storageOverviewWrap, saveNowBtn);
   const addFwBtn = createButton({
     label: t("settings.forwardings.add"),
     icon: "add",
@@ -2016,9 +2182,16 @@ function buildSettingsPage() {
   footerActions.className = "settings-footer-actions";
   footerActions.append(cancelBtn, saveBtn);
   saveFooter?.appendChild(footerActions);
-  ui.settingsFormRefs = { nasInterval, nasPath, themeSelect, languageSelect, saveBtn };
+  ui.settingsFormRefs = {
+    nasInterval,
+    nasPath,
+    themeSelect,
+    languageSelect,
+    saveBtn,
+  };
   ui.settingsDirty = false;
   renderDevicesSection();
+  refreshStorageOverview({ silent: true }).catch(() => {});
 }
 
 function renderForwardingTestResult() {
@@ -2758,7 +2931,8 @@ function renderSystemStatus(host = null) {
   const s = uptime % 60;
   const locale = currentLanguage === "de" ? "de-DE" : "en-US";
   const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString(locale) : t("status.system.noRunYet");
-  const lastNasError = status.last_nas_error || t("status.system.noError");
+  const rawNasErr = status.last_nas_error;
+  const lastNasError = rawNasErr ? escapeHtml(t(String(rawNasErr), {}, String(rawNasErr))) : escapeHtml(t("status.system.noError"));
   target.innerHTML = `
     <div class="list">
       <div class="list-item"><span>${t("status.system.uptime")}</span><strong>${h}h ${m}m ${s}s</strong></div>

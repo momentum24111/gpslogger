@@ -152,7 +152,7 @@
 
   --shadow-card: none;
   --shadow-map-overlay: none;
-  --shadow-modal: none;
+  --shadow-modal: 0 28px 90px color-mix(in srgb, var(--color-shadow) 62%, transparent);
 
   --modal-bg: var(--color-surface);
 

@@ -96,8 +96,39 @@
       "title": "Storage",
       "nasInterval": "Storage interval (seconds)",
       "nasPath": "Storage path",
+      "pathHint": "Only the part after the leading slash is editable. A Unix absolute path is always stored (starts with /).",
       "saveNow": "Save GPS information now",
-      "savedCount": "Saved: {count}"
+      "savedCount": "Saved: {count}",
+      "saveToast": "{count} position(s) were saved as NDJSON.",
+      "saveNothingPending": "No pending positions to save.",
+      "error": {
+        "intervalMin": "Interval must be at least 5 seconds.",
+        "formCheck": "Please check your input.",
+        "pathEmpty": "Storage path is missing. Enter an absolute path.",
+        "pathNotAbsolute": "The storage path must be absolute (start with /).",
+        "pathNotFound": "The storage path does not exist.",
+        "notADirectory": "The storage path is not a directory.",
+        "permissionDenied": "No write permission in the storage folder.",
+        "invalidPath": "The storage path is invalid.",
+        "writeTestFailed": "Write probe in the storage folder failed.",
+        "writeFailed": "Writing the NDJSON file failed.",
+        "noSpace": "Not enough disk space to write."
+      },
+      "overview": {
+        "title": "NDJSON export per device",
+        "refreshTitle": "Reload status",
+        "loading": "Loading status…",
+        "emptyDevices": "No devices configured.",
+        "pathLabel": "Target file",
+        "stored": "In file",
+        "pending": "Not yet saved",
+        "lastSave": "Last save",
+        "fileStatus": {
+          "exists": "File exists",
+          "wouldCreate": "Would be created",
+          "blocked": "Path blocked"
+        }
+      }
     },
     "forwardings": {
       "title": "Forwardings",
