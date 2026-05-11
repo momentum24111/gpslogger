@@ -2159,7 +2159,8 @@ function buildSettingsPage() {
   const pathStack = document.createElement("div");
   pathStack.className = "settings-storage-path-stack";
   pathStack.append(nasPathWrapEl, nasPathHint);
-  nasPath.field.replaceChild(pathStack, nasPathInputEl);
+  // Input wurde bereits in nasPathWrapEl verschoben (kein Kind von field mehr) — nicht replaceChild.
+  nasPath.field.insertBefore(pathStack, nasPath.message);
   nasPath.input = nasPathInputEl;
 
   const storageOverviewWrap = document.createElement("div");
