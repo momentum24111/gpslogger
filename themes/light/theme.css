@@ -131,7 +131,7 @@
 
   --card-bg: var(--color-bg);
   --card-border: var(--color-border);
-  --ui-panel-bg: transparent;
+  --ui-panel-bg: var(--header-bg);
   --ui-panel-shadow: none;
 
   --sidebar-item-fg: var(--color-text);
@@ -209,7 +209,7 @@
   --map-sidebar-toggle-active-hover-bg: color-mix(in srgb, var(--color-primary) 88%, var(--color-text));
   --map-sidebar-toggle-active-hover-fg: var(--primary-contrast, var(--color-surface-elevated));
   --map-drawer-backdrop-bg: var(--color-overlay);
-  --map-drawer-panel-bg: var(--color-surface-elevated);
+  --map-drawer-panel-bg: var(--header-bg);
   --map-drawer-panel-shadow: 0 8px 28px var(--color-shadow);
 }
 
