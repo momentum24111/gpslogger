@@ -94,15 +94,20 @@
     },
     "storage": {
       "title": "Storage",
-      "nasInterval": "Storage interval (seconds)",
+      "enable": "Enable GPS storage",
+      "nasInterval": "Storage interval",
+      "intervalHours": "Hours",
+      "intervalDays": "Days",
       "nasPath": "Storage path",
       "pathHint": "Only the part after the leading slash is editable. A Unix absolute path is always stored (starts with /).",
       "saveNow": "Save GPS information now",
+      "saveNowDisabledHint": "Enable GPS storage to save manually.",
       "savedCount": "Saved: {count}",
       "saveToast": "{count} position(s) were saved as NDJSON.",
       "saveNothingPending": "No pending positions to save.",
       "error": {
-        "intervalMin": "Interval must be at least 5 seconds.",
+        "intervalValueMin": "The interval must be at least 1.",
+        "intervalUnitInvalid": "Invalid interval unit.",
         "formCheck": "Please check your input.",
         "pathEmpty": "Storage path is missing. Enter an absolute path.",
         "pathNotAbsolute": "The storage path must be absolute (start with /).",
@@ -112,10 +117,12 @@
         "invalidPath": "The storage path is invalid.",
         "writeTestFailed": "Write probe in the storage folder failed.",
         "writeFailed": "Writing the NDJSON file failed.",
-        "noSpace": "Not enough disk space to write."
+        "noSpace": "Not enough disk space to write.",
+        "storageDisabled": "GPS storage is disabled."
       },
       "overview": {
-        "title": "NDJSON export per device",
+        "sectionLabel": "NDJSON export per device",
+        "title": "Overview",
         "refreshTitle": "Reload status",
         "loading": "Loading status…",
         "emptyDevices": "No devices configured.",

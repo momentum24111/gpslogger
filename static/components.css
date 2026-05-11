@@ -1305,12 +1305,48 @@ main {
   color: var(--color-text-muted);
 }
 
-.settings-storage-overview {
-  grid-column: 1 / -1;
+.settings-storage-path-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.settings-storage-interval-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.settings-storage-interval-value {
+  max-width: 6rem;
+  width: 100%;
+}
+
+.settings-storage-interval-segment.segmented {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-storage-ndjson-col {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
-  margin-top: var(--spacing-xs);
+  min-width: 0;
+}
+
+.settings-storage-ndjson-col .settings-form-button {
+  align-self: flex-start;
+}
+
+.settings-storage-overview {
+  margin-top: 0;
+}
+
+.settings-storage-overview-head--toolbar {
+  justify-content: flex-end;
 }
 
 .settings-storage-overview-head {
@@ -1422,8 +1458,30 @@ main {
     min-width: 0;
   }
 
-  .settings-section .ui-form-grid > .settings-storage-overview {
-    grid-column: 1 / -1;
+  .settings-section .ui-form-grid > .field > .settings-storage-path-stack {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-section .ui-form-grid > .field > .settings-storage-interval-control {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-section .ui-form-grid > .field > .settings-storage-ndjson-col {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-section .ui-form-grid > .field > .switch {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .settings-list-field {
@@ -1889,6 +1947,8 @@ main {
   min-height: 0;
   overflow-y: auto;
   flex: 1 1 auto;
+  padding-inline-end: var(--spacing-md);
+  scrollbar-gutter: stable;
 }
 
 

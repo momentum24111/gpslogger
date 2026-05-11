@@ -523,7 +523,11 @@ def save_scheduler():
     while True:
         try:
             settings = state.get_settings()
-            interval = max(5, int(settings.get("nas_interval_seconds", 60)))
+            if not bool(settings.get("nas_storage_enabled")):
+                time.sleep(15)
+                continue
+            interval = int(settings.get("nas_interval_seconds") or 3600)
+            interval = max(3600, interval)
             time.sleep(interval)
             with save_lock:
                 state.flush_pending_to_nas()
@@ -714,7 +718,16 @@ class Handler(BaseHTTPRequestHandler):
             nas_path_override = None
             if "nas_path" in query:
                 nas_path_override = str((query.get("nas_path") or [""])[0] or "").strip()
-            overview = state.get_storage_overview(nas_path_override=nas_path_override)
+            enabled_override: bool | None = None
+            if "nas_storage_enabled" in query:
+                raw_list = query.get("nas_storage_enabled") or [""]
+                raw_v = str(raw_list[0] if raw_list else "").strip()
+                if raw_v != "":
+                    enabled_override = raw_v.lower() in ("1", "true", "yes", "on")
+            overview = state.get_storage_overview(
+                nas_path_override,
+                nas_storage_enabled_override=enabled_override,
+            )
             return json_response(self, {"overview": overview})
         if route == "/api/forwarding/errors":
             query_limit = (query.get("limit", ["50"])[0] or "50")

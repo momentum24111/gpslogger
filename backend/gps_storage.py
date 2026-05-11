@@ -18,6 +18,16 @@ ERR_PERMISSION_DENIED = "settings.storage.error.permissionDenied"
 ERR_INVALID_PATH = "settings.storage.error.invalidPath"
 ERR_WRITE_TEST_FAILED = "settings.storage.error.writeTestFailed"
 ERR_WRITE_FAILED = "settings.storage.error.writeFailed"
+ERR_STORAGE_DISABLED = "settings.storage.error.storageDisabled"
+
+
+def compute_interval_seconds(value: int, unit: str) -> int:
+    """Mindestens 1 Stunde bzw. 1 Tag."""
+    u = str(unit or "hours").strip().lower()
+    v = max(1, int(value))
+    if u == "days":
+        return max(86400, v * 86400)
+    return max(3600, v * 3600)
 
 
 def sanitize_device_ndjson_stem(device_name: str, *, max_len: int = 64) -> str:

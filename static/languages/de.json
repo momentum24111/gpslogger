@@ -94,15 +94,20 @@
     },
     "storage": {
       "title": "Speicherung",
-      "nasInterval": "Speicherintervall (Sekunden)",
+      "enable": "GPS-Speicherung aktivieren",
+      "nasInterval": "Speicherintervall",
+      "intervalHours": "Stunden",
+      "intervalDays": "Tage",
       "nasPath": "Speicherpfad",
       "pathHint": "Nur der Teil nach dem führenden Schrägstrich ist editierbar. Es wird immer ein absoluter Unix-Pfad gespeichert (beginnt mit /).",
       "saveNow": "GPS-Informationen abspeichern",
+      "saveNowDisabledHint": "Aktivieren Sie die GPS-Speicherung, um manuell zu speichern.",
       "savedCount": "Gespeichert: {count}",
       "saveToast": "{count} Position(en) wurden als NDJSON gespeichert.",
       "saveNothingPending": "Keine ausstehenden Positionen zum Speichern.",
       "error": {
-        "intervalMin": "Intervall muss mindestens 5 Sekunden sein.",
+        "intervalValueMin": "Das Intervall muss mindestens 1 sein.",
+        "intervalUnitInvalid": "Ungültige Intervall-Einheit.",
         "formCheck": "Bitte Eingaben prüfen.",
         "pathEmpty": "Speicherpfad fehlt. Bitte einen absoluten Pfad eingeben.",
         "pathNotAbsolute": "Der Speicherpfad muss absolut sein (beginnt mit /).",
@@ -112,10 +117,12 @@
         "invalidPath": "Der Speicherpfad ist ungültig.",
         "writeTestFailed": "Schreibtest im Speicherordner ist fehlgeschlagen.",
         "writeFailed": "Schreiben der NDJSON-Datei ist fehlgeschlagen.",
-        "noSpace": "Nicht genug Speicherplatz zum Schreiben."
+        "noSpace": "Nicht genug Speicherplatz zum Schreiben.",
+        "storageDisabled": "GPS-Speicherung ist deaktiviert."
       },
       "overview": {
-        "title": "NDJSON-Export pro Gerät",
+        "sectionLabel": "NDJSON-Export pro Gerät",
+        "title": "Übersicht",
         "refreshTitle": "Status neu laden",
         "loading": "Lade Status…",
         "emptyDevices": "Keine Geräte angelegt.",

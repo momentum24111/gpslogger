@@ -212,12 +212,22 @@ function updateVisibleTexts() {
   if (statusForwardingTitle) statusForwardingTitle.textContent = t("status.forwardingErrors.title");
   if (statusRecentGpsTitle) statusRecentGpsTitle.textContent = t("status.recentGps.title");
 
-  const storageOverviewTitleEl = document.getElementById("settings-storage-overview-title");
-  if (storageOverviewTitleEl) storageOverviewTitleEl.textContent = t("settings.storage.overview.title");
+  const enl = document.getElementById("settings-storage-enable-label");
+  if (enl) enl.textContent = t("settings.storage.enable");
+  const ndSection = document.getElementById("settings-storage-ndjson-section-label");
+  if (ndSection) ndSection.textContent = t("settings.storage.overview.sectionLabel");
+  const hLab = document.querySelector('label[for="nas-interval-hours"]');
+  if (hLab) hLab.textContent = t("settings.storage.intervalHours");
+  const dLab = document.querySelector('label[for="nas-interval-days"]');
+  if (dLab) dLab.textContent = t("settings.storage.intervalDays");
   const storageOverviewRefreshEl = document.getElementById("settings-storage-overview-refresh");
   if (storageOverviewRefreshEl) {
-    storageOverviewRefreshEl.title = t("settings.storage.overview.refreshTitle");
-    storageOverviewRefreshEl.setAttribute("aria-label", t("settings.storage.overview.refreshTitle"));
+    const on = ui.settingsFormRefs?.nasStorageToggle?.classList.contains("enabled");
+    storageOverviewRefreshEl.title = on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint");
+    storageOverviewRefreshEl.setAttribute(
+      "aria-label",
+      on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint"),
+    );
   }
   const storagePathHintEl = document.getElementById("settings-storage-path-hint");
   if (storagePathHintEl) storagePathHintEl.textContent = t("settings.storage.pathHint");
@@ -227,6 +237,7 @@ function updateVisibleTexts() {
   renderRecentGps(ui.statusModalHost?.querySelector("#status-recent-gps") || null);
 
   if (ui.settingsModalOpen) {
+    syncNasStorageSettingsControls();
     refreshStorageOverview({ silent: true }).catch(() => {});
   }
 }
@@ -1112,19 +1123,25 @@ function dismissSettingsRoute() {
 
 async function persistMainSettingsFromUi() {
   const refs = ui.settingsFormRefs;
-  if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect) {
+  if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect || !refs?.nasStorageToggle) {
     throw new Error(t("settings.notLoaded"));
   }
-  const { nasInterval, nasPath, themeSelect } = refs;
+  const { nasInterval, nasPath, themeSelect, nasStorageToggle, nasIntervalValueInput, nasIntervalUnitRadios } = refs;
   setFieldState(nasInterval, "default", "");
   setFieldState(nasPath, "default", "");
-  const intervalValue = Number(nasInterval.input.value || 60);
-  if (!Number.isFinite(intervalValue) || intervalValue < 5) {
-    setFieldState(nasInterval, "error", t("settings.storage.error.intervalMin"));
+  const enabled = nasStorageToggle.classList.contains("enabled");
+  const iv = Number(nasIntervalValueInput.value || 1);
+  if (!Number.isFinite(iv) || iv < 1) {
+    setFieldState(nasInterval, "error", t("settings.storage.error.intervalValueMin"));
     throw new Error(t("settings.storage.error.formCheck"));
   }
+  let unit = "hours";
+  const checked = (nasIntervalUnitRadios || []).find((r) => r.checked);
+  if (checked?.value === "days") unit = "days";
   const payload = {
-    nas_interval_seconds: intervalValue,
+    nas_storage_enabled: enabled,
+    nas_interval_value: Math.floor(iv),
+    nas_interval_unit: unit,
     nas_path: buildAbsoluteNasPathFromInfix(nasPath.input.value),
     theme: themeSelect.input.value,
   };
@@ -1132,16 +1149,27 @@ async function persistMainSettingsFromUi() {
   try {
     data = await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
   } catch (err) {
-    setFieldState(nasPath, "error", err.message);
+    const ek = String(err.errorKey || "");
+    if (ek.includes("interval")) {
+      setFieldState(nasInterval, "error", err.message);
+    } else {
+      setFieldState(nasPath, "error", err.message);
+    }
     throw err;
   }
   state.settings = data.settings;
   applyTheme(state.settings.theme);
   setFieldState(nasInterval, "success", "");
+  nasIntervalValueInput.value = String(Math.max(1, Math.floor(Number(state.settings.nas_interval_value) || 1)));
+  const u = String(state.settings.nas_interval_unit || "hours").toLowerCase() === "days" ? "days" : "hours";
+  (nasIntervalUnitRadios || []).forEach((r) => {
+    r.checked = r.value === u;
+  });
   nasPath.input.value = nasPathSettingsToInfix(state.settings.nas_path || "");
   setFieldState(nasPath, "default", "");
   pushToast(ui.toastArea, t("settings.saved"), "success");
   ui.settingsDirty = false;
+  syncNasStorageSettingsControls();
   refreshStorageOverview({ silent: true }).catch(() => {});
 }
 
@@ -1911,15 +1939,32 @@ function openRotateKeyModal(device) {
   });
 }
 
+function syncNasStorageSettingsControls() {
+  const r = ui.settingsFormRefs;
+  if (!r?.nasStorageToggle || !r.nasPath?.input) return;
+  const on = r.nasStorageToggle.classList.contains("enabled");
+  if (r.nasIntervalValueInput) r.nasIntervalValueInput.disabled = !on;
+  (r.nasIntervalUnitRadios || []).forEach((inp) => {
+    inp.disabled = !on;
+  });
+  r.nasPath.input.disabled = !on;
+  if (r.saveNowBtn) {
+    r.saveNowBtn.disabled = !on;
+    r.saveNowBtn.title = on ? "" : t("settings.storage.saveNowDisabledHint");
+  }
+  const rb = document.getElementById("settings-storage-overview-refresh");
+  if (rb) {
+    rb.disabled = !on;
+    rb.title = on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint");
+    rb.setAttribute("aria-label", on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint"));
+  }
+}
+
 function renderStorageOverviewBody(bodyEl, overview) {
   if (!bodyEl || !overview) return;
   const devices = Array.isArray(overview.devices) ? overview.devices : [];
-  const banner =
-    overview.path_error_key && !overview.path_valid
-      ? `<div class="storage-overview-banner">${escapeHtml(t(overview.path_error_key))}</div>`
-      : "";
   if (devices.length === 0) {
-    bodyEl.innerHTML = `${banner}<p class="storage-overview-meta">${escapeHtml(t("settings.storage.overview.emptyDevices"))}</p>`;
+    bodyEl.innerHTML = `<p class="storage-overview-meta">${escapeHtml(t("settings.storage.overview.emptyDevices"))}</p>`;
     return;
   }
   const rows = devices
@@ -1946,7 +1991,7 @@ function renderStorageOverviewBody(bodyEl, overview) {
       </div>`;
     })
     .join("");
-  bodyEl.innerHTML = `${banner}${rows}`;
+  bodyEl.innerHTML = rows;
 }
 
 async function refreshStorageOverview({ silent = false, manual = false } = {}) {
@@ -1958,6 +2003,8 @@ async function refreshStorageOverview({ silent = false, manual = false } = {}) {
     const full = buildAbsoluteNasPathFromInfix(ui.settingsFormRefs.nasPath.input.value);
     const qs = new URLSearchParams();
     qs.set("nas_path", full);
+    const en = ui.settingsFormRefs?.nasStorageToggle?.classList.contains("enabled");
+    qs.set("nas_storage_enabled", en ? "true" : "false");
     const data = await api(`/api/storage/status?${qs.toString()}`);
     renderStorageOverviewBody(bodyEl, data.overview);
   } catch (err) {
@@ -2032,11 +2079,67 @@ function buildSettingsPage() {
   const storageHost = page.querySelector("#settings-storage");
   const forwardingAddHost = page.querySelector("#forwarding-add-host");
 
-  const nasInterval = createField({
-    label: t("settings.storage.nasInterval"),
-    type: "number",
-    value: String(state.settings.nas_interval_seconds || 60),
+  const storageEnableField = document.createElement("label");
+  storageEnableField.className = "field";
+  const storageEnableLabel = document.createElement("span");
+  storageEnableLabel.id = "settings-storage-enable-label";
+  storageEnableLabel.textContent = t("settings.storage.enable");
+  const storageEnableSw = createSwitch({
+    label: "",
+    value: !!state.settings.nas_storage_enabled,
+    onChange: () => {
+      ui.settingsDirty = true;
+      syncNasStorageSettingsControls();
+      scheduleStorageOverviewRefresh();
+    },
   });
+  const storageEnableMsg = document.createElement("small");
+  storageEnableMsg.className = "field-message";
+  storageEnableField.append(storageEnableLabel, storageEnableSw.wrap, storageEnableMsg);
+
+  const intervalNum = document.createElement("input");
+  intervalNum.type = "number";
+  intervalNum.className = "input settings-storage-interval-value";
+  intervalNum.min = "1";
+  intervalNum.step = "1";
+  intervalNum.value = String(Math.max(1, Math.floor(Number(state.settings.nas_interval_value) || 1)));
+  const segHost = document.createElement("div");
+  segHost.className = "segmented settings-storage-interval-segment";
+  const unitStored = String(state.settings.nas_interval_unit || "hours").toLowerCase() === "days" ? "days" : "hours";
+  const nasIntervalUnitRadios = [];
+  ["hours", "days"].forEach((u) => {
+    const id = `nas-interval-${u}`;
+    const inp = document.createElement("input");
+    inp.type = "radio";
+    inp.name = "nas-interval-unit";
+    inp.id = id;
+    inp.value = u;
+    inp.checked = unitStored === u;
+    const lab = document.createElement("label");
+    lab.setAttribute("for", id);
+    lab.textContent = u === "days" ? t("settings.storage.intervalDays") : t("settings.storage.intervalHours");
+    inp.addEventListener("change", () => {
+      ui.settingsDirty = true;
+    });
+    segHost.append(inp, lab);
+    nasIntervalUnitRadios.push(inp);
+  });
+  const intervalControl = document.createElement("div");
+  intervalControl.className = "settings-storage-interval-control";
+  intervalControl.append(intervalNum, segHost);
+  const intervalMsg = document.createElement("small");
+  intervalMsg.className = "field-message";
+  const nasInterval = {
+    field: document.createElement("label"),
+    input: intervalNum,
+    message: intervalMsg,
+  };
+  nasInterval.field.className = "field";
+  const intervalLbl = document.createElement("span");
+  intervalLbl.id = "settings-storage-interval-label";
+  intervalLbl.textContent = t("settings.storage.nasInterval");
+  nasInterval.field.append(intervalLbl, intervalControl, intervalMsg);
+
   const nasPath = createField({
     label: t("settings.storage.nasPath"),
     value: nasPathSettingsToInfix(state.settings.nas_path || ""),
@@ -2048,30 +2151,22 @@ function buildSettingsPage() {
   nasPathPrefixEl.className = "abs-path-prefix";
   nasPathPrefixEl.textContent = "/";
   nasPathPrefixEl.setAttribute("aria-hidden", "true");
-  nasPath.field.replaceChild(nasPathWrapEl, nasPathInputEl);
   nasPathWrapEl.append(nasPathPrefixEl, nasPathInputEl);
-  nasPath.input = nasPathInputEl;
   const nasPathHint = document.createElement("p");
   nasPathHint.className = "settings-storage-path-hint";
   nasPathHint.id = "settings-storage-path-hint";
   nasPathHint.textContent = t("settings.storage.pathHint");
-  nasPath.field.appendChild(nasPathHint);
-  const themeSelect = createField({ label: t("settings.system.theme"), type: "select" });
-  themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
-  themeSelect.input.value = state.settings.theme || "light";
-  const languageSelect = createField({ label: t("settings.system.language"), type: "select" });
-  languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
-  languageSelect.input.value = currentLanguage;
+  const pathStack = document.createElement("div");
+  pathStack.className = "settings-storage-path-stack";
+  pathStack.append(nasPathWrapEl, nasPathHint);
+  nasPath.field.replaceChild(pathStack, nasPathInputEl);
+  nasPath.input = nasPathInputEl;
 
   const storageOverviewWrap = document.createElement("div");
   storageOverviewWrap.className = "settings-storage-overview";
   storageOverviewWrap.id = "settings-storage-overview";
   const storageOverviewHead = document.createElement("div");
-  storageOverviewHead.className = "settings-storage-overview-head";
-  const storageOverviewTitle = document.createElement("span");
-  storageOverviewTitle.className = "storage-overview-title";
-  storageOverviewTitle.id = "settings-storage-overview-title";
-  storageOverviewTitle.textContent = t("settings.storage.overview.title");
+  storageOverviewHead.className = "settings-storage-overview-head settings-storage-overview-head--toolbar";
   const storageOverviewRefreshBtn = createIconButton({
     icon: "refresh",
     title: t("settings.storage.overview.refreshTitle"),
@@ -2079,7 +2174,7 @@ function buildSettingsPage() {
   });
   storageOverviewRefreshBtn.id = "settings-storage-overview-refresh";
   storageOverviewRefreshBtn.setAttribute("aria-label", t("settings.storage.overview.refreshTitle"));
-  storageOverviewHead.append(storageOverviewTitle, storageOverviewRefreshBtn);
+  storageOverviewHead.appendChild(storageOverviewRefreshBtn);
   const storageOverviewBody = document.createElement("div");
   storageOverviewBody.className = "settings-storage-overview-body";
   storageOverviewBody.id = "settings-storage-overview-body";
@@ -2089,6 +2184,10 @@ function buildSettingsPage() {
     label: t("settings.storage.saveNow"),
     icon: "save",
     onClick: async () => {
+      if (!ui.settingsFormRefs?.nasStorageToggle?.classList.contains("enabled")) {
+        pushToast(ui.toastArea, t("settings.storage.saveNowDisabledHint"), "info");
+        return;
+      }
       setFieldState(nasPath, "default", "");
       setButtonLoading(saveNowBtn, true, t("common.saving"));
       try {
@@ -2102,7 +2201,10 @@ function buildSettingsPage() {
         await refreshStorageOverview({ silent: true });
       } catch (err) {
         const msg = err?.message || t("errors.api");
-        setFieldState(nasPath, "error", msg);
+        const ek = String(err.errorKey || "");
+        if (!ek.includes("storageDisabled")) {
+          setFieldState(nasPath, "error", msg);
+        }
         pushToast(ui.toastArea, msg, "error");
       } finally {
         setButtonLoading(saveNowBtn, false);
@@ -2111,6 +2213,25 @@ function buildSettingsPage() {
   });
   saveNowBtn.classList.add("btn-secondary", "settings-form-button");
   saveNowBtn.id = "settings-save-now-btn";
+
+  const ndjsonField = document.createElement("label");
+  ndjsonField.className = "field settings-storage-ndjson-field";
+  const ndjsonLbl = document.createElement("span");
+  ndjsonLbl.id = "settings-storage-ndjson-section-label";
+  ndjsonLbl.textContent = t("settings.storage.overview.sectionLabel");
+  const ndjsonCol = document.createElement("div");
+  ndjsonCol.className = "settings-storage-ndjson-col";
+  const ndjsonMsg = document.createElement("small");
+  ndjsonMsg.className = "field-message";
+  ndjsonField.append(ndjsonLbl, ndjsonCol, ndjsonMsg);
+  ndjsonCol.append(storageOverviewWrap, saveNowBtn);
+
+  const themeSelect = createField({ label: t("settings.system.theme"), type: "select" });
+  themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
+  themeSelect.input.value = state.settings.theme || "light";
+  const languageSelect = createField({ label: t("settings.system.language"), type: "select" });
+  languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
+  languageSelect.input.value = currentLanguage;
 
   const saveBtn = createButton({
     label: t("settings.save"),
@@ -2148,13 +2269,20 @@ function buildSettingsPage() {
   });
   nasInterval.input.addEventListener("input", () => {
     ui.settingsDirty = true;
+    scheduleStorageOverviewRefresh();
+  });
+  nasIntervalUnitRadios.forEach((r) => {
+    r.addEventListener("change", () => {
+      ui.settingsDirty = true;
+      scheduleStorageOverviewRefresh();
+    });
   });
   nasPath.input.addEventListener("input", () => {
     ui.settingsDirty = true;
     scheduleStorageOverviewRefresh();
   });
   systemHost.append(themeSelect.field, languageSelect.field);
-  storageHost.append(nasInterval.field, nasPath.field, storageOverviewWrap, saveNowBtn);
+  storageHost.append(storageEnableField, nasInterval.field, nasPath.field, ndjsonField);
   const addFwBtn = createButton({
     label: t("settings.forwardings.add"),
     icon: "add",
@@ -2183,14 +2311,19 @@ function buildSettingsPage() {
   footerActions.append(cancelBtn, saveBtn);
   saveFooter?.appendChild(footerActions);
   ui.settingsFormRefs = {
+    nasStorageToggle: storageEnableSw.toggle,
     nasInterval,
+    nasIntervalValueInput: intervalNum,
+    nasIntervalUnitRadios,
     nasPath,
     themeSelect,
     languageSelect,
     saveBtn,
+    saveNowBtn,
   };
   ui.settingsDirty = false;
   renderDevicesSection();
+  syncNasStorageSettingsControls();
   refreshStorageOverview({ silent: true }).catch(() => {});
 }
 

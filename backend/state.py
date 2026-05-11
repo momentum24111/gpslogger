@@ -10,8 +10,11 @@ from typing import Any
 from urllib import parse as urlparse
 
 from .gps_storage import (
+    ERR_INVALID_PATH,
     ERR_PATH_EMPTY,
+    ERR_STORAGE_DISABLED,
     ERR_WRITE_FAILED,
+    compute_interval_seconds,
     count_ndjson_lines,
     device_ndjson_filename,
     export_line_for_item,
@@ -41,7 +44,10 @@ FORWARDING_BODY_SOURCES = {
 }
 
 DEFAULT_SETTINGS = {
-    "nas_interval_seconds": 60,
+    "nas_storage_enabled": False,
+    "nas_interval_value": 1,
+    "nas_interval_unit": "hours",
+    "nas_interval_seconds": 3600,
     "nas_path": "",
     "forwardings": [],
     "theme": "light",
@@ -74,6 +80,7 @@ class AppState:
         self.settings_path = self.data_dir / "settings.json"
         self.gps_path = self.data_dir / "gps.ndjson"
         self.pending_path = self.data_dir / "pending_nas.json"
+        self.ingest_seq_path = self.data_dir / "ingest_seq_next.json"
         self.status_path = self.data_dir / "device_statuses.json"
         self.forward_log_path = self.data_dir / "forwarding_errors.log"
         self.export_meta_path = self.data_dir / "nas_export_meta.json"
@@ -93,6 +100,8 @@ class AppState:
         self._migrate_settings_forwardings()
         self._migrate_devices_map_color()
         self._migrate_legacy_nas_path_default()
+        self._migrate_nas_storage_interval_and_flags()
+        self._migrate_gps_ingest_seq_and_pending_queue()
         self._persist_devices()
         self._persist_settings()
         self._persist_pending()
@@ -459,7 +468,7 @@ class AppState:
         with self._lock:
             return {
                 "device_count": len(self.devices),
-                "pending_nas_count": len(self.pending_nas),
+                "pending_nas_count": int(sum(self._count_unexported_gps_by_device_locked().values())),
                 "stored_status_count": len(self.device_statuses),
                 "last_nas_run_at": self.last_nas_run_at,
                 "last_nas_saved_count": self.last_nas_saved_count,
@@ -505,22 +514,49 @@ class AppState:
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            if "nas_interval_seconds" in payload:
+            if "nas_storage_enabled" in payload:
+                self.settings["nas_storage_enabled"] = bool(payload["nas_storage_enabled"])
+
+            if "nas_interval_value" in payload or "nas_interval_unit" in payload:
                 try:
-                    self.settings["nas_interval_seconds"] = max(5, int(payload["nas_interval_seconds"]))
+                    iv = int(payload.get("nas_interval_value", self.settings.get("nas_interval_value", 1)))
                 except (TypeError, ValueError):
-                    self.settings["nas_interval_seconds"] = DEFAULT_SETTINGS["nas_interval_seconds"]
+                    iv = 1
+                iv = max(1, iv)
+                unit = str(
+                    payload.get("nas_interval_unit") or self.settings.get("nas_interval_unit") or "hours"
+                ).strip().lower()
+                if unit not in ("hours", "days"):
+                    raise ConfigFieldError("settings.storage.error.intervalUnitInvalid")
+                self.settings["nas_interval_value"] = iv
+                self.settings["nas_interval_unit"] = unit
+                self.settings["nas_interval_seconds"] = compute_interval_seconds(iv, unit)
+
+            if "nas_interval_seconds" in payload and "nas_interval_value" not in payload and "nas_interval_unit" not in payload:
+                try:
+                    sec = max(5, int(payload["nas_interval_seconds"]))
+                except (TypeError, ValueError):
+                    sec = int(DEFAULT_SETTINGS["nas_interval_seconds"])
+                if sec >= 86400:
+                    self.settings["nas_interval_unit"] = "days"
+                    self.settings["nas_interval_value"] = max(1, sec // 86400)
+                else:
+                    self.settings["nas_interval_unit"] = "hours"
+                    self.settings["nas_interval_value"] = max(1, (sec + 3599) // 3600)
+                self.settings["nas_interval_seconds"] = compute_interval_seconds(
+                    int(self.settings["nas_interval_value"]), str(self.settings["nas_interval_unit"])
+                )
 
             if "nas_path" in payload:
-                nas_path = str(payload["nas_path"]).strip()
-                err_key = validate_nas_path_string_for_settings(nas_path)
-                if err_key:
-                    raise ConfigFieldError(err_key)
-                self.settings["nas_path"] = nas_path
+                self.settings["nas_path"] = str(payload["nas_path"]).strip()
 
             if "theme" in payload:
                 theme = str(payload["theme"]).strip()
                 self.settings["theme"] = theme or DEFAULT_SETTINGS["theme"]
+
+            if bool(self.settings.get("nas_storage_enabled")):
+                self._validate_nas_path_when_storage_enabled(str(self.settings.get("nas_path") or ""))
+
             self._persist_settings()
             return dict(self.settings)
 
@@ -640,15 +676,266 @@ class AppState:
                     return dict(self._normalize_forwarding_entry(f))
             return None
 
+    def _migrate_nas_storage_interval_and_flags(self) -> None:
+        """Intervall als Wert+Einheit; aktiviert-Flag; aus legacy nas_interval_seconds ableiten."""
+        changed = False
+        s = self.settings
+        if "nas_storage_enabled" not in s:
+            s["nas_storage_enabled"] = False
+            changed = True
+        if "nas_interval_unit" not in s or "nas_interval_value" not in s:
+            try:
+                old_sec = max(5, int(s.get("nas_interval_seconds", 60)))
+            except (TypeError, ValueError):
+                old_sec = 3600
+            if old_sec >= 86400:
+                s["nas_interval_unit"] = "days"
+                s["nas_interval_value"] = max(1, old_sec // 86400)
+            else:
+                s["nas_interval_unit"] = "hours"
+                s["nas_interval_value"] = max(1, (old_sec + 3599) // 3600)
+            changed = True
+        try:
+            iv = max(1, int(s.get("nas_interval_value", 1)))
+        except (TypeError, ValueError):
+            iv = 1
+        unit = str(s.get("nas_interval_unit") or "hours").strip().lower()
+        if unit not in ("hours", "days"):
+            unit = "hours"
+            changed = True
+        s["nas_interval_value"] = iv
+        s["nas_interval_unit"] = unit
+        new_sec = compute_interval_seconds(iv, unit)
+        if int(s.get("nas_interval_seconds", 0)) != new_sec:
+            s["nas_interval_seconds"] = new_sec
+            changed = True
+        if changed:
+            self._persist_settings()
+
+    def _validate_nas_path_when_storage_enabled(self, nas_path: str) -> None:
+        text = str(nas_path or "").strip()
+        if not text:
+            raise ConfigFieldError(ERR_PATH_EMPTY)
+        err = validate_nas_path_string_for_settings(text)
+        if err:
+            raise ConfigFieldError(err)
+        try:
+            p = Path(text)
+        except Exception:
+            raise ConfigFieldError(ERR_INVALID_PATH)
+        v_err = validate_absolute_writable_directory(p)
+        if v_err:
+            raise ConfigFieldError(v_err)
+
+    def _migrate_gps_ingest_seq_and_pending_queue(self) -> None:
+        """ingest_seq in gps.ndjson ergänzen; nächste Seq-Nummer reparieren; pending_nas entfällt als Export-Queue."""
+        with self._lock:
+            self._backfill_gps_ingest_seq_locked()
+            self._repair_ingest_seq_next_locked()
+            self.pending_nas = []
+            self._persist_pending()
+
+    def _gps_max_ingest_seq_locked(self) -> int:
+        m = 0
+        if not self.gps_path.exists():
+            return m
+        try:
+            with self.gps_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    raw = item.get("ingest_seq")
+                    if raw is None:
+                        continue
+                    try:
+                        m = max(m, int(raw))
+                    except (TypeError, ValueError):
+                        continue
+        except OSError:
+            return m
+        return m
+
+    def _backfill_gps_ingest_seq_locked(self) -> None:
+        if not self.gps_path.exists():
+            return
+        needs = False
+        try:
+            with self.gps_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(item, dict) and item.get("ingest_seq") is None:
+                        needs = True
+                        break
+        except OSError:
+            return
+        if not needs:
+            return
+        items: list[dict[str, Any]] = []
+        try:
+            with self.gps_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(obj, dict):
+                        items.append(obj)
+        except OSError:
+            return
+        n = 1
+        for obj in items:
+            obj["ingest_seq"] = n
+            n += 1
+        tmp = self.gps_path.with_suffix(".ndjson.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as w:
+                for obj in items:
+                    w.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            tmp.replace(self.gps_path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            return
+        write_json(self.ingest_seq_path, {"next": n})
+
+    def _repair_ingest_seq_next_locked(self) -> None:
+        max_seq = self._gps_max_ingest_seq_locked()
+        raw = read_json(self.ingest_seq_path, {})
+        cur_next = 1
+        if isinstance(raw, dict) and raw.get("next") is not None:
+            try:
+                cur_next = max(1, int(raw["next"]))
+            except (TypeError, ValueError):
+                cur_next = 1
+        new_next = max(cur_next, max_seq + 1)
+        if new_next != cur_next or not self.ingest_seq_path.exists():
+            write_json(self.ingest_seq_path, {"next": new_next})
+
+    def _allocate_ingest_seq_locked(self) -> int:
+        if not self.ingest_seq_path.exists():
+            self._repair_ingest_seq_next_locked()
+        raw = read_json(self.ingest_seq_path, {"next": 1})
+        n = 1
+        if isinstance(raw, dict) and raw.get("next") is not None:
+            try:
+                n = max(1, int(raw["next"]))
+            except (TypeError, ValueError):
+                n = 1
+        write_json(self.ingest_seq_path, {"next": n + 1})
+        return n
+
+    def _max_exported_ingest_by_device_locked(self) -> dict[str, int]:
+        meta = self._read_export_meta()
+        raw = meta.get("device_max_exported_ingest_seq")
+        out: dict[str, int] = {}
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                try:
+                    out[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        return out
+
+    def _count_unexported_gps_by_device_locked(self) -> Counter[str]:
+        wm = self._max_exported_ingest_by_device_locked()
+        c: Counter[str] = Counter()
+        if not self.gps_path.exists():
+            return c
+        try:
+            with self.gps_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    did = str(item.get("device_id", "")).strip()
+                    if not did:
+                        continue
+                    if self._position_row_from_stored(item) is None:
+                        continue
+                    try:
+                        seq = int(item.get("ingest_seq"))
+                    except (TypeError, ValueError):
+                        continue
+                    if seq > int(wm.get(did, 0)):
+                        c[did] += 1
+        except OSError:
+            return c
+        return c
+
+    def _unexported_gps_groups_locked(self) -> dict[str, list[dict[str, Any]]]:
+        wm = self._max_exported_ingest_by_device_locked()
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        if not self.gps_path.exists():
+            return groups
+        try:
+            with self.gps_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    did = str(item.get("device_id", "")).strip()
+                    if not did:
+                        continue
+                    if self._position_row_from_stored(item) is None:
+                        continue
+                    try:
+                        seq = int(item.get("ingest_seq"))
+                    except (TypeError, ValueError):
+                        continue
+                    if seq > int(wm.get(did, 0)):
+                        groups[did].append(item)
+        except OSError:
+            return groups
+        for did in groups:
+            groups[did].sort(key=lambda it: int(it.get("ingest_seq") or 0))
+        return groups
+
+    def _device_registry_name_locked(self, did: str) -> str | None:
+        for d in self.devices:
+            if isinstance(d, dict) and str(d.get("id", "")).strip() == did:
+                n = str(d.get("name", "") or "").strip()
+                return n or None
+        return None
+
     def _read_export_meta(self) -> dict[str, Any]:
         raw = read_json(self.export_meta_path, {})
         if not isinstance(raw, dict):
-            return {"device_last_export_at": {}}
+            raw = {}
         d = raw.get("device_last_export_at")
         if not isinstance(d, dict):
             d = {}
-        cleaned = {str(k): str(v) for k, v in d.items() if k is not None}
-        return {"device_last_export_at": cleaned}
+        cleaned_times = {str(k): str(v) for k, v in d.items() if k is not None}
+        wx = raw.get("device_max_exported_ingest_seq")
+        wmap: dict[str, int] = {}
+        if isinstance(wx, dict):
+            for k, v in wx.items():
+                try:
+                    wmap[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        return {"device_last_export_at": cleaned_times, "device_max_exported_ingest_seq": wmap}
 
     def _write_export_meta(self, meta: dict[str, Any]) -> None:
         write_json(self.export_meta_path, meta)
@@ -663,41 +950,39 @@ class AppState:
         with path.open("r+b") as handle:
             handle.truncate(original_size)
 
-    def get_storage_overview(self, nas_path_override: str | None = None) -> dict[str, Any]:
-        """Status für die UI: Pfadprüfung, Dateien, Zähler pending/gespeichert pro Gerät."""
+    def get_storage_overview(
+        self,
+        nas_path_override: str | None = None,
+        *,
+        nas_storage_enabled_override: bool | None = None,
+    ) -> dict[str, Any]:
+        """Status für die UI: Zähler immer; Pfad/Dateien nur bei aktivierter Speicherung und gesetztem Pfad."""
         with self._lock:
             raw_path = str(
                 nas_path_override if nas_path_override is not None else (self.settings.get("nas_path") or "")
             ).strip()
-            pending_by_id: Counter[str] = Counter()
-            for item in self.pending_nas:
-                did = str(item.get("device_id", "")).strip()
-                if did:
-                    pending_by_id[did] += 1
+            if nas_storage_enabled_override is not None:
+                storage_on = bool(nas_storage_enabled_override)
+            else:
+                storage_on = bool(self.settings.get("nas_storage_enabled"))
+
+            pending_by_id = self._count_unexported_gps_by_device_locked()
             meta = self._read_export_meta()
             last_export_map: dict[str, str] = dict(meta.get("device_last_export_at") or {})
 
             devices_out: list[dict[str, Any]] = []
-            path_error_key: str | None = None
             path_valid = False
             nas_root_resolved = ""
 
-            if not raw_path:
-                path_error_key = ERR_PATH_EMPTY
-            else:
+            if storage_on and raw_path:
                 try:
                     nas_root = Path(raw_path)
                 except Exception:
-                    path_error_key = "settings.storage.error.invalidPath"
                     nas_root = None
                 else:
-                    if not nas_root.is_absolute():
-                        path_error_key = "settings.storage.error.pathNotAbsolute"
-                    else:
+                    if nas_root.is_absolute():
                         v_err = validate_absolute_writable_directory(nas_root)
-                        if v_err:
-                            path_error_key = v_err
-                        else:
+                        if not v_err:
                             path_valid = True
                             nas_root_resolved = str(nas_root.resolve())
 
@@ -740,7 +1025,6 @@ class AppState:
                     }
                 )
 
-            # Pending für unbekannte Geräte-IDs (z. B. nach Löschen)
             known_ids = {str(d.get("id", "")).strip() for d in self.devices if isinstance(d, dict)}
             for did, cnt in pending_by_id.items():
                 if did in known_ids or cnt <= 0:
@@ -778,14 +1062,15 @@ class AppState:
                 "nas_path_effective": raw_path,
                 "nas_path_resolved": nas_root_resolved,
                 "path_valid": path_valid,
-                "path_error_key": path_error_key,
+                "nas_storage_enabled": storage_on,
                 "devices": devices_out,
             }
 
     def store_gps_request(self, payload: dict[str, Any]) -> None:
         with self._lock:
+            payload = dict(payload)
+            payload["ingest_seq"] = self._allocate_ingest_seq_locked()
             self._append_gps_line(payload)
-            self.pending_nas.append(payload)
             device_id = str(payload.get("device_id", "")).strip()
             if device_id:
                 st: dict[str, Any] = {
@@ -807,15 +1092,18 @@ class AppState:
                     if payload.get(k) is not None:
                         st[k] = payload[k]
                 self.device_statuses[device_id] = st
-            self._persist_pending()
             self._persist_statuses()
 
     def flush_pending_to_nas(self) -> dict[str, Any]:
         with self._lock:
-            pending = list(self.pending_nas)
-            if not pending:
-                self.mark_nas_run(saved_count=0, error=None)
-                return {"ok": True, "saved_count": 0, "by_device": {}, "nas_path_resolved": ""}
+            if not bool(self.settings.get("nas_storage_enabled")):
+                return {
+                    "ok": False,
+                    "saved_count": 0,
+                    "error_key": ERR_STORAGE_DISABLED,
+                    "by_device": {},
+                    "nas_path_resolved": "",
+                }
 
             raw_path = str(self.settings.get("nas_path") or "").strip()
             if not raw_path:
@@ -838,24 +1126,26 @@ class AppState:
                 self.mark_nas_run(0, error=v_err)
                 return {"ok": False, "saved_count": 0, "error_key": v_err, "by_device": {}}
 
-            valid_pending = [i for i in pending if str(i.get("device_id", "")).strip()]
-            invalid_pending = [i for i in pending if not str(i.get("device_id", "")).strip()]
-
-            if not valid_pending:
-                self.pending_nas = invalid_pending
+            groups = self._unexported_gps_groups_locked()
+                self.pending_nas = []
                 self._persist_pending()
-                self.mark_nas_run(0, error=None)
-                return {"ok": True, "saved_count": 0, "by_device": {}, "nas_path_resolved": str(nas_root.resolve())}
-
-            groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for item in valid_pending:
-                did = str(item.get("device_id", "")).strip()
-                groups[did].append(item)
+                self.mark_nas_run(saved_count=0, error=None)
+                return {
+                    "ok": True,
+                    "saved_count": 0,
+                    "by_device": {},
+                    "nas_path_resolved": str(nas_root.resolve()),
+                }
 
             lines_by_path: dict[Path, str] = {}
             by_device_counts: dict[str, int] = {}
+            new_watermarks: dict[str, int] = {}
+
             for did, items in groups.items():
-                name = str(items[0].get("device_name") or "device")
+                if not items:
+                    continue
+                reg_name = self._device_registry_name_locked(did)
+                name = reg_name or str(items[0].get("device_name") or "device")
                 fname = device_ndjson_filename(name, did)
                 path = nas_root / fname
                 try:
@@ -878,6 +1168,7 @@ class AppState:
                 blob = "".join(export_line_for_item(it) for it in items)
                 lines_by_path[path] = lines_by_path.get(path, "") + blob
                 by_device_counts[did] = len(items)
+                new_watermarks[did] = max(int(it.get("ingest_seq") or 0) for it in items)
 
             snapshots: dict[Path, tuple[bool, int]] = {}
             for path in lines_by_path:
@@ -900,15 +1191,18 @@ class AppState:
                 self.mark_nas_run(0, error=err_key)
                 return {"ok": False, "saved_count": 0, "error_key": err_key, "by_device": {}}
 
-            self.pending_nas = invalid_pending
+            self.pending_nas = []
             self._persist_pending()
 
             meta = self._read_export_meta()
             inner = dict(meta.get("device_last_export_at") or {})
+            wmap = dict(meta.get("device_max_exported_ingest_seq") or {})
             now = utc_now_iso()
-            for did in groups:
+            for did, max_seq in new_watermarks.items():
                 inner[did] = now
+                wmap[did] = max_seq
             meta["device_last_export_at"] = inner
+            meta["device_max_exported_ingest_seq"] = wmap
             self._write_export_meta(meta)
 
             total_written = sum(by_device_counts.values())
