@@ -1127,6 +1127,7 @@ class AppState:
                 return {"ok": False, "saved_count": 0, "error_key": v_err, "by_device": {}}
 
             groups = self._unexported_gps_groups_locked()
+            if not any(groups.values()):
                 self.pending_nas = []
                 self._persist_pending()
                 self.mark_nas_run(saved_count=0, error=None)
