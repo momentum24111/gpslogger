@@ -796,7 +796,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
         if route in ("/favicon.ico", "/favicon.svg"):
-            return self._serve_file(STATIC_DIR / "favicon.svg")
+            return self._serve_file(STATIC_DIR / "icons" / "icon.svg")
         if route in ("/", "/index.html"):
             return self._serve_file(STATIC_DIR / "index.html")
         if route.startswith("/static/"):

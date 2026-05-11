@@ -1,5 +1,5 @@
 /* GPSLogger Service Worker — App-Shell & Leaflet-CDN, APIs immer live */
-const CACHE_VERSION = "gpslogger-v1";
+const CACHE_VERSION = "gpslogger-v2";
 const CACHE_NAME = `gpslogger-static-${CACHE_VERSION}`;
 
 const PRECACHE_SAME_ORIGIN = [
@@ -9,12 +9,8 @@ const PRECACHE_SAME_ORIGIN = [
   "/static/app.js",
   "/static/ui-components.js",
   "/static/ripple.js",
-  "/static/manifest.webmanifest",
-  "/static/favicon.svg",
-  "/static/icons/icon-192.png",
-  "/static/icons/icon-512.png",
-  "/static/icons/icon-maskable-512.png",
-  "/static/icons/apple-touch-icon.png",
+  "/static/manifest.webmanifest?v=20260511",
+  "/static/icons/icon.svg?v=20260511",
   "/themes/light/theme.css",
   "/themes/dark/theme.css",
 ];
