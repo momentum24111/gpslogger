@@ -80,7 +80,7 @@
     "saved": "Settings saved",
     "unsaved": {
       "title": "Unsaved changes",
-      "message": "There are unsaved changes in NAS path, interval, theme or language. Save or discard?",
+      "message": "There are unsaved changes to storage path, storage interval, theme or language. Save or discard?",
       "discard": "Discard settings"
     },
     "title": "Settings",
@@ -94,8 +94,8 @@
     },
     "storage": {
       "title": "Storage",
-      "nasInterval": "NAS interval (seconds)",
-      "nasPath": "NAS path",
+      "nasInterval": "Storage interval (seconds)",
+      "nasPath": "Storage path",
       "saveNow": "Save GPS information now",
       "savedCount": "Saved: {count}"
     },

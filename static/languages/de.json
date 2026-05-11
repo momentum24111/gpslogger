@@ -80,7 +80,7 @@
     "saved": "Einstellungen gespeichert",
     "unsaved": {
       "title": "Ungespeicherte Änderungen",
-      "message": "Es gibt nicht gespeicherte Änderungen an NAS-Pfad, Intervall, Theme oder Sprache. Speichern oder verwerfen?",
+      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Theme oder Sprache. Speichern oder verwerfen?",
       "discard": "Einstellungen verwerfen"
     },
     "title": "Einstellungen",
@@ -94,8 +94,8 @@
     },
     "storage": {
       "title": "Speicherung",
-      "nasInterval": "NAS Intervall (Sekunden)",
-      "nasPath": "NAS Pfad",
+      "nasInterval": "Speicherintervall (Sekunden)",
+      "nasPath": "Speicherpfad",
       "saveNow": "GPS-Informationen abspeichern",
       "savedCount": "Gespeichert: {count}"
     },
