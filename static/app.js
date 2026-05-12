@@ -95,10 +95,6 @@ function updateVisibleTexts() {
   if (settingsSaveBtn) settingsSaveBtn.innerHTML = `<span class="material-symbols-outlined">check</span> ${t("settings.save")}`;
   const settingsCancelBtn = document.getElementById("settings-cancel-btn");
   if (settingsCancelBtn) settingsCancelBtn.innerHTML = `<span class="material-symbols-outlined">close</span> ${t("settings.cancel")}`;
-  const settingsForwardingLabel = document.getElementById("settings-forwardings-label");
-  if (settingsForwardingLabel) settingsForwardingLabel.textContent = t("settings.forwardings.title");
-  const settingsDevicesLabel = document.getElementById("settings-devices-label");
-  if (settingsDevicesLabel) settingsDevicesLabel.textContent = t("settings.devices.title");
   const addForwardingBtn = document.getElementById("settings-add-forwarding-btn");
   if (addForwardingBtn) {
     addForwardingBtn.innerHTML = `<span class="material-symbols-outlined">add</span> ${t("settings.forwardings.add")}`;
@@ -147,8 +143,8 @@ function updateVisibleTexts() {
   if (settingsForwardingsTitle) settingsForwardingsTitle.textContent = t("settings.forwardings.title");
   const settingsDevicesTitle = document.getElementById("settings-devices-title");
   if (settingsDevicesTitle) settingsDevicesTitle.textContent = t("settings.devices.title");
-  const settingsActionsLabel = document.querySelector(".settings-action-label");
-  if (settingsActionsLabel) settingsActionsLabel.textContent = t("settings.actions.title");
+  const settingsActionsTitle = document.getElementById("settings-actions-title");
+  if (settingsActionsTitle) settingsActionsTitle.textContent = t("settings.actions.title");
   if (ui.settingsFormRefs?.nasInterval?.field) {
     const lbl = ui.settingsFormRefs.nasInterval.field.querySelector("span");
     if (lbl) lbl.textContent = t("settings.storage.nasInterval");
@@ -222,8 +218,9 @@ function updateVisibleTexts() {
   if (dLab) dLab.textContent = t("settings.storage.intervalDays");
   const storageOverviewRefreshEl = document.getElementById("settings-storage-overview-refresh");
   if (storageOverviewRefreshEl) {
+    storageOverviewRefreshEl.innerHTML = `<span class="material-symbols-outlined">refresh</span> ${t("settings.storage.overview.refreshTitle")}`;
     const on = ui.settingsFormRefs?.nasStorageToggle?.classList.contains("enabled");
-    storageOverviewRefreshEl.title = on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint");
+    storageOverviewRefreshEl.title = on ? "" : t("settings.storage.saveNowDisabledHint");
     storageOverviewRefreshEl.setAttribute(
       "aria-label",
       on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint"),
@@ -1955,7 +1952,7 @@ function syncNasStorageSettingsControls() {
   const rb = document.getElementById("settings-storage-overview-refresh");
   if (rb) {
     rb.disabled = !on;
-    rb.title = on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint");
+    rb.title = on ? "" : t("settings.storage.saveNowDisabledHint");
     rb.setAttribute("aria-label", on ? t("settings.storage.overview.refreshTitle") : t("settings.storage.saveNowDisabledHint"));
   }
 }
@@ -2034,13 +2031,18 @@ function buildSettingsPage() {
         <h3 id="settings-system-title">${t("settings.system.title")}</h3>
         <div id="settings-system" class="ui-form-grid"></div>
       </section>
-      <section class="settings-section">
-        <h3 id="settings-storage-title">${t("settings.storage.title")}</h3>
-        <div id="settings-storage" class="ui-form-grid"></div>
-      </section>
-      <section class="settings-section">
+      <section class="settings-section settings-section--list">
+        <h3 id="settings-devices-title">${t("settings.devices.title")}</h3>
         <div class="ui-form-grid">
-          <span id="settings-forwardings-label" class="settings-row-label">${t("settings.forwardings.title")}</span>
+          <div class="settings-list-field">
+            <div id="devices-list" class="list ui-list"></div>
+            <div id="devices-add-host" class="settings-list-actions"></div>
+          </div>
+        </div>
+      </section>
+      <section class="settings-section settings-section--list">
+        <h3 id="settings-forwardings-title">${t("settings.forwardings.title")}</h3>
+        <div class="ui-form-grid">
           <div id="settings-forwarding" class="settings-list-field">
             <div id="forwardings-list" class="list ui-list"></div>
             <div id="forwarding-add-host" class="settings-list-actions"></div>
@@ -2049,15 +2051,11 @@ function buildSettingsPage() {
         </div>
       </section>
       <section class="settings-section">
-        <div class="ui-form-grid">
-          <span id="settings-devices-label" class="settings-row-label">${t("settings.devices.title")}</span>
-          <div class="settings-list-field">
-            <div id="devices-list" class="list ui-list"></div>
-            <div id="devices-add-host" class="settings-list-actions"></div>
-          </div>
-        </div>
+        <h3 id="settings-storage-title">${t("settings.storage.title")}</h3>
+        <div id="settings-storage" class="ui-form-grid"></div>
       </section>
       <section class="settings-section settings-actions-section">
+        <h3 id="settings-actions-title">${t("settings.actions.title")}</h3>
         <div id="settings-actions" class="ui-form-grid"></div>
       </section>
       </div>
@@ -2166,20 +2164,18 @@ function buildSettingsPage() {
   const storageOverviewWrap = document.createElement("div");
   storageOverviewWrap.className = "settings-storage-overview";
   storageOverviewWrap.id = "settings-storage-overview";
-  const storageOverviewHead = document.createElement("div");
-  storageOverviewHead.className = "settings-storage-overview-head settings-storage-overview-head--toolbar";
-  const storageOverviewRefreshBtn = createIconButton({
-    icon: "refresh",
-    title: t("settings.storage.overview.refreshTitle"),
-    onClick: () => refreshStorageOverview({ manual: true }),
-  });
-  storageOverviewRefreshBtn.id = "settings-storage-overview-refresh";
-  storageOverviewRefreshBtn.setAttribute("aria-label", t("settings.storage.overview.refreshTitle"));
-  storageOverviewHead.appendChild(storageOverviewRefreshBtn);
   const storageOverviewBody = document.createElement("div");
   storageOverviewBody.className = "settings-storage-overview-body";
   storageOverviewBody.id = "settings-storage-overview-body";
-  storageOverviewWrap.append(storageOverviewHead, storageOverviewBody);
+  storageOverviewWrap.appendChild(storageOverviewBody);
+
+  const storageOverviewRefreshBtn = createButton({
+    label: t("settings.storage.overview.refreshTitle"),
+    icon: "refresh",
+    onClick: () => refreshStorageOverview({ manual: true }),
+  });
+  storageOverviewRefreshBtn.id = "settings-storage-overview-refresh";
+  storageOverviewRefreshBtn.classList.add("btn-secondary", "settings-form-button");
 
   const saveNowBtn = createButton({
     label: t("settings.storage.saveNow"),
@@ -2215,6 +2211,10 @@ function buildSettingsPage() {
   saveNowBtn.classList.add("btn-secondary", "settings-form-button");
   saveNowBtn.id = "settings-save-now-btn";
 
+  const storageActionsRow = document.createElement("div");
+  storageActionsRow.className = "settings-storage-actions-row";
+  storageActionsRow.append(storageOverviewRefreshBtn, saveNowBtn);
+
   const ndjsonField = document.createElement("label");
   ndjsonField.className = "field settings-storage-ndjson-field";
   const ndjsonLbl = document.createElement("span");
@@ -2225,7 +2225,7 @@ function buildSettingsPage() {
   const ndjsonMsg = document.createElement("small");
   ndjsonMsg.className = "field-message";
   ndjsonField.append(ndjsonLbl, ndjsonCol, ndjsonMsg);
-  ndjsonCol.append(storageOverviewWrap, saveNowBtn);
+  ndjsonCol.append(storageOverviewWrap, storageActionsRow);
 
   const themeSelect = createField({ label: t("settings.system.theme"), type: "select" });
   themeSelect.input.innerHTML = state.themes.map((name) => `<option value="${name}">${name}</option>`).join("");
@@ -2295,9 +2295,6 @@ function buildSettingsPage() {
   forwardingAddHost?.appendChild(addFwBtn);
   renderForwardingList();
   const actionsHost = page.querySelector("#settings-actions");
-  const actionsLabel = document.createElement("span");
-  actionsLabel.className = "settings-action-label";
-  actionsLabel.textContent = t("settings.actions.title");
   const restartBtn = createButton({
     label: t("settings.actions.restart"),
     icon: "refresh",
@@ -2305,7 +2302,7 @@ function buildSettingsPage() {
   });
   restartBtn.id = "settings-restart-btn";
   restartBtn.classList.add("btn-secondary", "settings-form-button");
-  actionsHost?.append(actionsLabel, restartBtn);
+  actionsHost?.appendChild(restartBtn);
   const saveFooter = page.querySelector("#settings-save-footer");
   const footerActions = document.createElement("div");
   footerActions.className = "settings-footer-actions";
