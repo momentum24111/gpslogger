@@ -13,7 +13,6 @@ Built for people who want:
 - open interfaces
 - no vendor lock in
 
----
 
 ## Screenshots
 
@@ -33,7 +32,6 @@ Built for people who want:
 
 ![Settings Light](docs/screenshots/settings2_light.jpeg)
 
----
 
 # Why GPSLogger?
 
@@ -57,7 +55,6 @@ Your GPS data:
 
 You own your location history.
 
----
 
 # Open Source from Device to Server
 
@@ -73,7 +70,6 @@ This creates a completely open source GPS pipeline:
 
 No tracking cloud required.
 
----
 
 # Typical Use Cases
 
@@ -87,7 +83,6 @@ Use your own GPS positions to detect:
 
 Perfect for Home Assistant and similar systems.
 
----
 
 ## Photography and Geotagging
 
@@ -99,7 +94,6 @@ GPSLogger allows external applications to retrieve location data and match it wi
 - archive organization
 - map visualization
 
----
 
 ## Personal Position History
 
@@ -109,7 +103,6 @@ View:
 - multiple devices simultaneously
 - live updates on the map
 
----
 
 ## GPS Data Hub
 
@@ -123,7 +116,6 @@ Applications can:
 
 This avoids duplicating GPS logic across multiple systems.
 
----
 
 # Features
 
@@ -146,7 +138,6 @@ This avoids duplicating GPS logic across multiple systems.
 - easy backups
 - portable data structure
 
----
 
 # Installation
 
@@ -163,7 +154,6 @@ Afterwards available at:
 http://127.0.0.1:8080
 ```
 
----
 
 # Project Structure
 
