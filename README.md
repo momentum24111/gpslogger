@@ -12,7 +12,7 @@ Danach ist die Anwendung unter `http://localhost:8080` erreichbar.
 
 ## Struktur
 
-- `backend/`: API, Persistenz, NAS-Flush, Weiterleitung
+- `backend/`: API, Persistenz, periodischer NDJSON-Export, Weiterleitung
 - `static/`: WebUI (Material-orientierte Komponenten + Kartenansicht)
 - `themes/`: getrennte Theme-Variablen (`light`, `dark`)
 - `data/`: Laufzeitdaten (wird automatisch angelegt)

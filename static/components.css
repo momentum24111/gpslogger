@@ -1473,12 +1473,12 @@ main {
     justify-self: start;
   }
 
-  .settings-list-field {
-    grid-column: 2;
+  .settings-section .ui-form-grid > .settings-row-label {
+    grid-column: 1;
   }
 
-  .settings-section.settings-section--list .ui-form-grid > .settings-list-field {
-    grid-column: 1 / -1;
+  .settings-list-field {
+    grid-column: 2;
   }
 
   .settings-save-footer {

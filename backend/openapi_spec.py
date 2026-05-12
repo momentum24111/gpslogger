@@ -19,13 +19,13 @@ def build_openapi_spec() -> dict:
             {"name": "System", "description": "Laufzeit, Themes und Gesundheitschecks"},
             {"name": "Geräte", "description": "Geräte anlegen, umbenennen, löschen, API-Keys"},
             {"name": "Weiterleitungen", "description": "HTTP-Weiterleitungen für Rohe GPS-Requests"},
-            {"name": "Einstellungen", "description": "Globale Einstellungen (NAS, Theme, Forwardings-Liste lesen)"},
+            {"name": "Einstellungen", "description": "Globale Einstellungen (NDJSON-Speicherexport, Theme, Forwardings-Liste lesen)"},
             {
                 "name": "GPS-Ingest",
                 "description": (
                     "Positionsdaten per Mobilgerät: `application/x-www-form-urlencoded`, "
                     "`Authorization: Bearer <api_key>`. "
-                    "Werkbank-kompatibel unter `/api/current-location`; Legacy `/api/gps`."
+                    "Alias-Endpunkt `/api/current-location` (formularbasiert wie bei gängigen GPS-Apps); Legacy `/api/gps`."
                 ),
             },
             {
@@ -57,7 +57,7 @@ def build_openapi_spec() -> dict:
                     "summary": "Neustart über Deploy-Webhook",
                     "description": (
                         "Löst asynchron einen POST auf den lokalen Webhook aus (kein systemctl im HTTP-Handler). "
-                        "Typischerweise nur nach Authelia erreichbar; nicht für öffentliche GPS-Clients."
+                        "Sollte nur in vertrauenswürdigen, administrativ abgesicherten Umgebungen erreichbar sein; nicht für öffentliche GPS-Clients."
                     ),
                     "operationId": "postAdminRestart",
                     "responses": {
@@ -92,11 +92,11 @@ def build_openapi_spec() -> dict:
             "/api/system/status": {
                 "get": {
                     "tags": ["System"],
-                    "summary": "Laufzeit- und NAS-Status",
+                    "summary": "Laufzeit- und Export-Status",
                     "operationId": "getSystemStatus",
                     "responses": {
                         "200": {
-                            "description": "Statistik und letzte NAS-Läufe",
+                            "description": "Statistik und Übersicht der letzten NDJSON-Exportläufe",
                             "content": {
                                 "application/json": {
                                     "schema": {"$ref": "#/components/schemas/SystemStatusResponse"}
@@ -625,14 +625,14 @@ def build_openapi_spec() -> dict:
             "/api/current-location": {
                 "post": {
                     "tags": ["GPS-Ingest"],
-                    "summary": "Aktuelle Position melden (Werkbank)",
+                    "summary": "Aktuelle Position melden (Formular-Endpunkt)",
                     "description": (
-                        "Gleiches Schema wie Werkbank: `Content-Type: application/x-www-form-urlencoded`, "
+                        "Gleiches Schema wie `/api/gps`: `Content-Type: application/x-www-form-urlencoded`, "
                         "`Authorization: Bearer <api_key>`. "
                         "Pflicht: `latitude`, `longitude`. "
                         "Optional (werden gespeichert und bei Weiterleitungen als identischer Request-Body versendet): "
                         "`device`, `accuracy`, `battery`, `speed`, `direction`, `altitude`, `provider`, `activity`, `time`. "
-                        "`time` ist ISO-8601 (wie bei Werkbank); fehlt sie, setzt der Server den Zeitstempel."
+                        "`time` ist ISO-8601; fehlt sie, setzt der Server den Zeitstempel."
                     ),
                     "operationId": "postCurrentLocation",
                     "security": [{"bearerApiKey": []}],
@@ -910,7 +910,7 @@ def build_openapi_spec() -> dict:
                     "properties": {
                         "latitude": {"type": "string", "description": "Breitengrad (Dezimal)"},
                         "longitude": {"type": "string", "description": "Längengrad (Dezimal)"},
-                        "device": {"type": "string", "description": "Geräte-/Client-Kennung laut Werkbank"},
+                        "device": {"type": "string", "description": "Geräte-/Client-Kennung im Original-Requestfeld device"},
                         "accuracy": {"type": "string", "description": "Genauigkeit (m), nicht negativ wenn numerisch"},
                         "battery": {
                             "type": "string",

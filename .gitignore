@@ -1,9 +1,29 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
 
 # Runtime data
 data/
+*.log
+logs/
+
+# Local config
+.env
+.env.*
+*.local
+config.local.*
+settings.local.*
 
 # IDE / local
 .cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

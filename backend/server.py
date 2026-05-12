@@ -532,7 +532,7 @@ def save_scheduler():
             with save_lock:
                 state.flush_pending_to_nas()
         except Exception as exc:
-            print(f"[nas-scheduler] error: {exc}")
+            print(f"[ndjson-export-scheduler] error: {exc}")
             state.mark_nas_run(saved_count=0, error=str(exc))
 
 

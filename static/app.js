@@ -1718,7 +1718,7 @@ async function openDeviceEditorModal(device = null) {
   const content = document.createElement("div");
   const nameField = createField({
     label: "Name",
-    placeholder: "z. B. Caspar",
+    placeholder: "z. B. Mein Smartphone",
     value: isEdit ? String(device.name || "") : "",
   });
   const keyField = createField({
@@ -2031,18 +2031,18 @@ function buildSettingsPage() {
         <h3 id="settings-system-title">${t("settings.system.title")}</h3>
         <div id="settings-system" class="ui-form-grid"></div>
       </section>
-      <section class="settings-section settings-section--list">
-        <h3 id="settings-devices-title">${t("settings.devices.title")}</h3>
+      <section class="settings-section">
         <div class="ui-form-grid">
+          <span class="settings-row-label" id="settings-devices-title">${t("settings.devices.title")}</span>
           <div class="settings-list-field">
             <div id="devices-list" class="list ui-list"></div>
             <div id="devices-add-host" class="settings-list-actions"></div>
           </div>
         </div>
       </section>
-      <section class="settings-section settings-section--list">
-        <h3 id="settings-forwardings-title">${t("settings.forwardings.title")}</h3>
+      <section class="settings-section">
         <div class="ui-form-grid">
+          <span class="settings-row-label" id="settings-forwardings-title">${t("settings.forwardings.title")}</span>
           <div id="settings-forwarding" class="settings-list-field">
             <div id="forwardings-list" class="list ui-list"></div>
             <div id="forwarding-add-host" class="settings-list-actions"></div>

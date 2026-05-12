@@ -1,4 +1,4 @@
-"""Validierung des NAS-/Export-Verzeichnisses und Hilfen für NDJSON-Dateinamen."""
+"""Validierung des Zielverzeichnisses für NDJSON-Export und Hilfen für NDJSON-Dateinamen."""
 
 from __future__ import annotations
 
