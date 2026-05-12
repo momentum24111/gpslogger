@@ -17,25 +17,21 @@ Built for people who want:
 
 ## Screenshots
 
-### Start Page (Dark)
+### Start Page
 
 ![Start Page Dark](docs/screenshots/startpage_dark.jpeg)
 
-### Start Page (Light)
+### Start Page
 
 ![Start Page Light](docs/screenshots/startpage_light.jpeg)
 
-### Settings (Dark)
+### Settings
 
 ![Settings Dark](docs/screenshots/settings1_dark.jpeg)
 
-### Settings (Light)
+### Settings
 
 ![Settings Light](docs/screenshots/settings2_light.jpeg)
-
-### Create Forwarding
-
-![Create Forwarding](docs/screenshots/createnewforward.jpeg)
 
 ---
 
