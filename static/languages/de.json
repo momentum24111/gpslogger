@@ -207,9 +207,9 @@
       "testWebhookAria": "Testnachricht an Webhook senden",
       "testSuccess": "Testnachricht erfolgreich gesendet",
       "inactivity": {
-        "enableLabel": "Benachrichtigung bei ausbleibender Position aktivieren",
+        "enableLabel": "Benachrichtigung bei ausbleibender Position",
         "thresholdLabel": "Warnung nach",
-        "thresholdHint": "Wenn seit der letzten gespeicherten Position kein weiterer Punkt eintrifft.",
+        "thresholdHint": "Wenn seit der letzten gespeicherten Position innerhalb der eingestellten Zeit kein neuer Punkt eintrifft, wird automatisch eine Telegram-Nachricht gesendet.",
         "unitMinutes": "Minuten",
         "unitHours": "Stunden",
         "warningMessage": "⚠️ Gerät {deviceName} hat seit {duration} keine Position mehr gesendet.",

@@ -1174,16 +1174,67 @@ main {
   width: 100%;
 }
 
+.settings-webhook-url-control {
   display: flex;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: var(--spacing-sm);
   width: 100%;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .settings-webhook-url-control .input {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  width: 100%;
+  max-width: none;
+}
+
+.settings-webhook-url-control .icon-btn {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 900px) {
+  .settings-section .ui-form-grid > .field.settings-field-webhook-row {
+    align-items: center;
+  }
+
+  .settings-section .ui-form-grid > .field.settings-field-webhook-row > span:first-child {
+    padding-top: 0;
+    align-self: center;
+  }
+}
+
+/* Inaktivitäts-Schwellen: deaktiviert klar erkennbar (nicht nur pointer-events) */
+.field.settings-notifications-threshold-field.is-disabled > span:first-child {
+  opacity: 0.52;
+  color: var(--color-text-muted);
+}
+
+.field.settings-notifications-threshold-field.is-disabled .settings-notifications-threshold-stack {
+  position: relative;
+  opacity: 0.5;
+  filter: saturate(0.55);
+  pointer-events: none;
+}
+
+.field.settings-notifications-threshold-field.is-disabled .settings-notifications-threshold-stack::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg) 42%, transparent);
+  pointer-events: none;
+}
+
+.field.settings-notifications-threshold-field.is-disabled .segmented label {
+  cursor: not-allowed;
+}
+
+.field.settings-notifications-threshold-field.is-disabled .segmented label:hover {
+  background: transparent;
+  color: var(--seg-fg, var(--color-text-muted));
 }
 
 .settings-section-head {

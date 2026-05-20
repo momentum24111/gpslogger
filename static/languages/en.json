@@ -207,9 +207,9 @@
       "testWebhookAria": "Send test message to webhook",
       "testSuccess": "Test message sent successfully",
       "inactivity": {
-        "enableLabel": "Enable notification when positions stop arriving",
+        "enableLabel": "Notification when positions stop",
         "thresholdLabel": "Warn after",
-        "thresholdHint": "Measured from each device last stored GPS position.",
+        "thresholdHint": "If no new position arrives within the configured time since the last stored point, a Telegram message is sent automatically.",
         "unitMinutes": "Minutes",
         "unitHours": "Hours",
         "warningMessage": "⚠️ Device {deviceName} has not sent a position for {duration}.",

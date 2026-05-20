@@ -2391,6 +2391,7 @@ function buildSettingsPage() {
     placeholder: "",
   });
   telegramWebhook.input.setAttribute("autocomplete", "off");
+  telegramWebhook.field.classList.add("settings-field-webhook-row");
   const twRow = document.createElement("div");
   twRow.className = "settings-webhook-url-control";
   const twTestBtn = createIconButton({
@@ -2491,7 +2492,7 @@ function buildSettingsPage() {
   const inactivityThresholdMsg = document.createElement("small");
   inactivityThresholdMsg.className = "field-message";
   const inactivityThresholdFieldEl = document.createElement("label");
-  inactivityThresholdFieldEl.className = "field";
+  inactivityThresholdFieldEl.className = "field settings-notifications-threshold-field";
   const inactivityThresholdLbl = document.createElement("span");
   inactivityThresholdLbl.id = "settings-inactivity-threshold-label";
   inactivityThresholdLbl.textContent = t("settings.notifications.inactivity.thresholdLabel");
@@ -2510,6 +2511,7 @@ function buildSettingsPage() {
     inactivityUnitRadios.forEach((r) => {
       r.disabled = !on;
     });
+    inactivityThresholdFieldEl.classList.toggle("is-disabled", !on);
   }
   syncInactivityFieldsVisibility();
   ui.syncInactivityThresholdVisibility = syncInactivityFieldsVisibility;
