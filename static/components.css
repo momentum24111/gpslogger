@@ -1174,13 +1174,6 @@ main {
   width: 100%;
 }
 
-.settings-notifications-inactivity-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-}
-
-.settings-webhook-url-control {
   display: flex;
   align-items: stretch;
   gap: var(--spacing-sm);
@@ -1325,6 +1318,13 @@ main {
 }
 
 .settings-storage-path-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.settings-notifications-threshold-stack {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
@@ -1481,6 +1481,13 @@ main {
   }
 
   .settings-section .ui-form-grid > .field > .settings-webhook-url-control {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-section .ui-form-grid > .field > .settings-notifications-threshold-stack {
     grid-column: 2;
     width: 100%;
     max-width: 100%;

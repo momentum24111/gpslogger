@@ -2383,86 +2383,6 @@ function buildSettingsPage() {
     ui.settingsDirty = true;
     scheduleStorageOverviewRefresh();
   });
-  const inactivityNotificationSw = createSwitch({
-    label: t("settings.notifications.inactivity.enableLabel"),
-    value: !!state.settings.inactivity_notification_enabled,
-    onChange: () => {
-      ui.settingsDirty = true;
-      ui.syncInactivityThresholdVisibility?.();
-    },
-  });
-  const iaEnLabel = inactivityNotificationSw.wrap.querySelector("span");
-  if (iaEnLabel) iaEnLabel.id = "settings-inactivity-enable-label";
-
-  const inactivityIntervalNum = document.createElement("input");
-  inactivityIntervalNum.type = "number";
-  inactivityIntervalNum.min = "1";
-  inactivityIntervalNum.step = "1";
-  inactivityIntervalNum.className = "input settings-storage-interval-value";
-  inactivityIntervalNum.value = String(Math.max(1, Math.floor(Number(state.settings.inactivity_threshold_value) || 5)));
-
-  const inactivityUnitStored =
-    String(state.settings.inactivity_threshold_unit || "minutes").toLowerCase() === "hours" ? "hours" : "minutes";
-  const inactivityUnitRadios = [];
-  const inactivitySegHost = document.createElement("div");
-  inactivitySegHost.className = "segmented settings-storage-interval-segment";
-  ["minutes", "hours"].forEach((u) => {
-    const id = `inactivity-unit-${u}`;
-    const inp = document.createElement("input");
-    inp.type = "radio";
-    inp.name = "inactivity-threshold-unit";
-    inp.id = id;
-    inp.value = u;
-    inp.checked = inactivityUnitStored === u;
-    const lab = document.createElement("label");
-    lab.setAttribute("for", id);
-    lab.textContent =
-      u === "hours" ? t("settings.notifications.inactivity.unitHours") : t("settings.notifications.inactivity.unitMinutes");
-    inp.addEventListener("change", () => {
-      ui.settingsDirty = true;
-    });
-    inactivitySegHost.append(inp, lab);
-    inactivityUnitRadios.push(inp);
-  });
-
-  const inactivityControl = document.createElement("div");
-  inactivityControl.className = "settings-storage-interval-control";
-  inactivityControl.append(inactivityIntervalNum, inactivitySegHost);
-
-  const inactivityThresholdMsg = document.createElement("small");
-  inactivityThresholdMsg.className = "field-message";
-  const inactivityThresholdFieldEl = document.createElement("label");
-  inactivityThresholdFieldEl.className = "field";
-  const inactivityThresholdLbl = document.createElement("span");
-  inactivityThresholdLbl.id = "settings-inactivity-threshold-label";
-  inactivityThresholdLbl.textContent = t("settings.notifications.inactivity.thresholdLabel");
-  const inactivityHint = document.createElement("p");
-  inactivityHint.className = "settings-storage-path-hint";
-  inactivityHint.id = "settings-inactivity-threshold-hint";
-  inactivityHint.textContent = t("settings.notifications.inactivity.thresholdHint");
-  inactivityThresholdFieldEl.append(inactivityThresholdLbl, inactivityControl, inactivityHint, inactivityThresholdMsg);
-
-  function syncInactivityFieldsVisibility() {
-    const on = inactivityNotificationSw.toggle.classList.contains("enabled");
-    inactivityThresholdFieldEl.hidden = !on;
-  }
-  syncInactivityFieldsVisibility();
-  ui.syncInactivityThresholdVisibility = syncInactivityFieldsVisibility;
-
-  const inactivityThreshold = {
-    field: inactivityThresholdFieldEl,
-    input: inactivityIntervalNum,
-    message: inactivityThresholdMsg,
-  };
-
-  const inactivityStack = document.createElement("div");
-  inactivityStack.className = "settings-notifications-inactivity-stack";
-  inactivityStack.append(inactivityNotificationSw.wrap, inactivityThresholdFieldEl);
-  inactivityIntervalNum.addEventListener("input", () => {
-    ui.settingsDirty = true;
-  });
-
-  notificationsHost?.appendChild(inactivityStack);
 
   const telegramWebhook = createField({
     label: t("settings.notifications.telegramWebhookUrl"),
@@ -2515,6 +2435,98 @@ function buildSettingsPage() {
     ui.settingsDirty = true;
   });
   notificationsHost?.appendChild(telegramWebhook.field);
+
+  const inactivityEnableField = document.createElement("label");
+  inactivityEnableField.className = "field";
+  const inactivityEnableLabel = document.createElement("span");
+  inactivityEnableLabel.id = "settings-inactivity-enable-label";
+  inactivityEnableLabel.textContent = t("settings.notifications.inactivity.enableLabel");
+  const inactivityNotificationSw = createSwitch({
+    label: "",
+    value: !!state.settings.inactivity_notification_enabled,
+    onChange: () => {
+      ui.settingsDirty = true;
+      ui.syncInactivityThresholdVisibility?.();
+    },
+  });
+  const inactivityEnableMsg = document.createElement("small");
+  inactivityEnableMsg.className = "field-message";
+  inactivityEnableField.append(inactivityEnableLabel, inactivityNotificationSw.wrap, inactivityEnableMsg);
+
+  const inactivityIntervalNum = document.createElement("input");
+  inactivityIntervalNum.type = "number";
+  inactivityIntervalNum.min = "1";
+  inactivityIntervalNum.step = "1";
+  inactivityIntervalNum.className = "input settings-storage-interval-value";
+  inactivityIntervalNum.value = String(Math.max(1, Math.floor(Number(state.settings.inactivity_threshold_value) || 5)));
+
+  const inactivityUnitStored =
+    String(state.settings.inactivity_threshold_unit || "minutes").toLowerCase() === "hours" ? "hours" : "minutes";
+  const inactivityUnitRadios = [];
+  const inactivitySegHost = document.createElement("div");
+  inactivitySegHost.className = "segmented settings-storage-interval-segment";
+  ["minutes", "hours"].forEach((u) => {
+    const id = `inactivity-unit-${u}`;
+    const inp = document.createElement("input");
+    inp.type = "radio";
+    inp.name = "inactivity-threshold-unit";
+    inp.id = id;
+    inp.value = u;
+    inp.checked = inactivityUnitStored === u;
+    const lab = document.createElement("label");
+    lab.setAttribute("for", id);
+    lab.textContent =
+      u === "hours" ? t("settings.notifications.inactivity.unitHours") : t("settings.notifications.inactivity.unitMinutes");
+    inp.addEventListener("change", () => {
+      ui.settingsDirty = true;
+    });
+    inactivitySegHost.append(inp, lab);
+    inactivityUnitRadios.push(inp);
+  });
+
+  const inactivityControl = document.createElement("div");
+  inactivityControl.className = "settings-storage-interval-control";
+  inactivityControl.append(inactivityIntervalNum, inactivitySegHost);
+
+  const inactivityThresholdMsg = document.createElement("small");
+  inactivityThresholdMsg.className = "field-message";
+  const inactivityThresholdFieldEl = document.createElement("label");
+  inactivityThresholdFieldEl.className = "field";
+  const inactivityThresholdLbl = document.createElement("span");
+  inactivityThresholdLbl.id = "settings-inactivity-threshold-label";
+  inactivityThresholdLbl.textContent = t("settings.notifications.inactivity.thresholdLabel");
+  const inactivityHint = document.createElement("p");
+  inactivityHint.className = "settings-storage-path-hint";
+  inactivityHint.id = "settings-inactivity-threshold-hint";
+  inactivityHint.textContent = t("settings.notifications.inactivity.thresholdHint");
+  const inactivityThresholdStack = document.createElement("div");
+  inactivityThresholdStack.className = "settings-notifications-threshold-stack";
+  inactivityThresholdStack.append(inactivityControl, inactivityHint);
+  inactivityThresholdFieldEl.append(inactivityThresholdLbl, inactivityThresholdStack, inactivityThresholdMsg);
+
+  function syncInactivityFieldsVisibility() {
+    const on = inactivityNotificationSw.toggle.classList.contains("enabled");
+    inactivityIntervalNum.disabled = !on;
+    inactivityUnitRadios.forEach((r) => {
+      r.disabled = !on;
+    });
+  }
+  syncInactivityFieldsVisibility();
+  ui.syncInactivityThresholdVisibility = syncInactivityFieldsVisibility;
+
+  const inactivityThreshold = {
+    field: inactivityThresholdFieldEl,
+    input: inactivityIntervalNum,
+    message: inactivityThresholdMsg,
+  };
+
+  inactivityIntervalNum.addEventListener("input", () => {
+    ui.settingsDirty = true;
+  });
+
+  notificationsHost?.appendChild(inactivityEnableField);
+  notificationsHost?.appendChild(inactivityThresholdFieldEl);
+
   systemHost.append(themeSelect.field, languageSelect.field);
   storageHost.append(storageEnableField, nasInterval.field, nasPath.field, ndjsonField);
   const addFwBtn = createButton({
