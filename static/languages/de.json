@@ -20,6 +20,7 @@
     "clearing": "Löscht...",
     "name": "Name",
     "enabled": "Aktiviert",
+    "disabled": "Aus",
     "unknown": "Unbekannt",
     "yes": "ja",
     "no": "nein",
@@ -80,7 +81,7 @@
     "saved": "Einstellungen gespeichert",
     "unsaved": {
       "title": "Ungespeicherte Änderungen",
-      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Telegram-Webhook, Theme oder Sprache. Speichern oder verwerfen?",
+      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Telegram-Benachrichtigung bei ausbleibenden Positionen, Telegram-Webhook, Theme oder Sprache. Speichern oder verwerfen?",
       "discard": "Einstellungen verwerfen"
     },
     "title": "Einstellungen",
@@ -90,7 +91,10 @@
     "system": {
       "title": "System",
       "theme": "Theme",
-      "language": "Sprache"
+      "language": "Sprache",
+      "error": {
+        "languageInvalid": "Unterstützt sind nur Deutsch und Englisch."
+      }
     },
     "storage": {
       "title": "Speicherung",
@@ -199,8 +203,28 @@
     "notifications": {
       "title": "Benachrichtigungen",
       "telegramWebhookUrl": "Telegram Webhook URL",
+      "telegramTestMessage": "📣 Testnachricht von GPSLogger.",
       "testWebhookAria": "Testnachricht an Webhook senden",
       "testSuccess": "Testnachricht erfolgreich gesendet",
+      "inactivity": {
+        "enableLabel": "Benachrichtigung bei ausbleibender Position aktivieren",
+        "thresholdLabel": "Warnung nach",
+        "thresholdHint": "Wenn seit der letzten gespeicherten Position kein weiterer Punkt eintrifft.",
+        "unitMinutes": "Minuten",
+        "unitHours": "Stunden",
+        "warningMessage": "⚠️ Gerät {deviceName} hat seit {duration} keine Position mehr gesendet.",
+        "clearMessage": "✅ Gerät {deviceName} sendet wieder Positionen.",
+        "durationMinutesOne": "{count} Minute",
+        "durationMinutesMany": "{count} Minuten",
+        "durationHoursOne": "{count} Stunde",
+        "durationHoursMany": "{count} Stunden",
+        "blockedNoWebhookStatus": "Hinweis: Benachrichtigungen bei ausbleibenden Positionen sind aktiv, aber es ist keine Telegram-Webhook-URL gespeichert.",
+        "statusBlockedLine": "Inaktivität: Hinweis",
+        "logSkippedNoWebhook": "Konfigurationshinweis: keine Telegram-Webhook-URL gespeichert.",
+        "error": {
+          "unitInvalid": "Ungültige Zeiteinheit für die Inaktivitätsüberwachung."
+        }
+      },
       "error": {
         "webhookUrlInvalid": "Die URL muss mit http:// oder https:// beginnen und gültig sein.",
         "webhookUrlRequired": "Bitte eine Webhook-URL eintragen.",
@@ -232,7 +256,9 @@
       "lastNasSaved": "Beim letzten Export gespeichert",
       "nasErrorState": "Fehlerstatus Export",
       "noRunYet": "Noch kein Lauf",
-      "noError": "Kein Fehler"
+      "noError": "Kein Fehler",
+      "inactivityNotifyEnabled": "Überwachung ausbleibende Position",
+      "inactivityBlockedNoWebhookDetail": "Status"
     },
     "forwardingErrors": {
       "title": "Forwarding Fehler",

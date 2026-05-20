@@ -477,7 +477,8 @@ def build_openapi_spec() -> dict:
                     "tags": ["Benachrichtigungen"],
                     "summary": "Telegram-Webhook-URL testen",
                     "description": (
-                        "Sendet vom Server einen POST mit Content-Type application/json und festem Test-Body an die übergebene `url`."
+                        "Sendet vom Server einen POST mit Content-Type application/json und einem sprachabhängigen Test-Body "
+                        "`{\"message\": ...}` gemäß Einstellung `language`, an die übergebene `url`."
                     ),
                     "operationId": "testTelegramWebhook",
                     "requestBody": {

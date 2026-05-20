@@ -20,6 +20,7 @@
     "clearing": "Clearing...",
     "name": "Name",
     "enabled": "Enabled",
+    "disabled": "Off",
     "unknown": "Unknown",
     "yes": "yes",
     "no": "no",
@@ -80,7 +81,7 @@
     "saved": "Settings saved",
     "unsaved": {
       "title": "Unsaved changes",
-      "message": "There are unsaved changes to storage path, storage interval, Telegram webhook, theme, or language. Save or discard?",
+      "message": "There are unsaved changes to storage path, storage interval, missing-position Telegram notifications, Telegram webhook, theme, or language. Save or discard?",
       "discard": "Discard settings"
     },
     "title": "Settings",
@@ -90,7 +91,10 @@
     "system": {
       "title": "System",
       "theme": "Theme",
-      "language": "Language"
+      "language": "Language",
+      "error": {
+        "languageInvalid": "Only German and English are supported."
+      }
     },
     "storage": {
       "title": "Storage",
@@ -199,8 +203,28 @@
     "notifications": {
       "title": "Notifications",
       "telegramWebhookUrl": "Telegram webhook URL",
+      "telegramTestMessage": "📣 Test message from GPSLogger.",
       "testWebhookAria": "Send test message to webhook",
       "testSuccess": "Test message sent successfully",
+      "inactivity": {
+        "enableLabel": "Enable notification when positions stop arriving",
+        "thresholdLabel": "Warn after",
+        "thresholdHint": "Measured from each device last stored GPS position.",
+        "unitMinutes": "Minutes",
+        "unitHours": "Hours",
+        "warningMessage": "⚠️ Device {deviceName} has not sent a position for {duration}.",
+        "clearMessage": "✅ Device {deviceName} is sending positions again.",
+        "durationMinutesOne": "{count} minute",
+        "durationMinutesMany": "{count} minutes",
+        "durationHoursOne": "{count} hour",
+        "durationHoursMany": "{count} hours",
+        "blockedNoWebhookStatus": "Note: missing-position alerts are enabled, but no Telegram webhook URL is stored.",
+        "statusBlockedLine": "Inactivity notice",
+        "logSkippedNoWebhook": "Configuration note: no Telegram webhook URL stored.",
+        "error": {
+          "unitInvalid": "Invalid time unit for inactive-device monitoring."
+        }
+      },
       "error": {
         "webhookUrlInvalid": "The URL must be valid and start with http:// or https://.",
         "webhookUrlRequired": "Please enter a webhook URL.",
@@ -232,7 +256,9 @@
       "lastNasSaved": "Saved in last export run",
       "nasErrorState": "Export error state",
       "noRunYet": "No run yet",
-      "noError": "No error"
+      "noError": "No error",
+      "inactivityNotifyEnabled": "Missing-position monitoring",
+      "inactivityBlockedNoWebhookDetail": "Status detail"
     },
     "forwardingErrors": {
       "title": "Forwarding errors",

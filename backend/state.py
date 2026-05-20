@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib import parse as urlparse
 
+from .locale_bundle import format_inactivity_duration, normalize_ui_language, translate
 from .gps_storage import (
     ERR_INVALID_PATH,
     ERR_PATH_EMPTY,
@@ -52,6 +53,10 @@ DEFAULT_SETTINGS = {
     "forwardings": [],
     "telegram_webhook_url": "",
     "theme": "light",
+    "language": "de",
+    "inactivity_notification_enabled": False,
+    "inactivity_threshold_value": 5,
+    "inactivity_threshold_unit": "minutes",
 }
 
 
@@ -85,6 +90,7 @@ class AppState:
         self.status_path = self.data_dir / "device_statuses.json"
         self.forward_log_path = self.data_dir / "forwarding_errors.log"
         self.export_meta_path = self.data_dir / "nas_export_meta.json"
+        self.inactivity_notify_state_path = self.data_dir / "device_inactivity_notify_state.json"
 
         self._lock = threading.RLock()
         self.devices: list[dict[str, Any]] = read_json(self.devices_path, [])
@@ -97,6 +103,8 @@ class AppState:
         self.last_nas_saved_count: int = 0
         self.last_nas_error: str | None = None
         self._device_drafts: dict[str, tuple[float, str]] = {}
+        self._device_inactivity_warned: dict[str, bool] = self._load_inactivity_notify_state_locked()
+        self._inactivity_runtime_block: dict[str, Any] | None = None
 
         self._migrate_settings_forwardings()
         self._migrate_devices_map_color()
@@ -107,6 +115,152 @@ class AppState:
         self._persist_settings()
         self._persist_pending()
         self._persist_statuses()
+
+    def _load_inactivity_notify_state_locked(self) -> dict[str, bool]:
+        raw = read_json(self.inactivity_notify_state_path, {})
+        warned = raw.get("warn_sent")
+        if not isinstance(warned, dict):
+            return {}
+        out: dict[str, bool] = {}
+        for k, v in warned.items():
+            key = str(k).strip()
+            if key:
+                out[key] = bool(v)
+        return out
+
+    def _persist_inactivity_notify_state_locked(self) -> None:
+        write_json(
+            self.inactivity_notify_state_path,
+            {"warn_sent": {k: bool(v) for k, v in self._device_inactivity_warned.items()}},
+        )
+
+    def _prune_inactivity_flags_for_deleted_devices_locked(self) -> None:
+        known = {str(d.get("id", "")).strip() for d in self.devices if isinstance(d, dict)}
+        stale_keys = [k for k in self._device_inactivity_warned if k not in known]
+        if stale_keys:
+            for k in stale_keys:
+                del self._device_inactivity_warned[k]
+            self._persist_inactivity_notify_state_locked()
+
+    @staticmethod
+    def _parse_status_time_utc(value: Any) -> datetime | None:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def tick_device_inactivity_notifications(self) -> None:
+        """Wird etwa alle 60s vom Hintergrund-Thread aufgerufen."""
+        now = datetime.now(timezone.utc)
+
+        def threshold_seconds(settings_copy: dict[str, Any]) -> tuple[int, int, str]:
+            try:
+                th_val = int(settings_copy.get("inactivity_threshold_value", 5))
+            except (TypeError, ValueError):
+                th_val = 5
+            th_val = max(1, min(th_val, 525600))
+            unit = str(settings_copy.get("inactivity_threshold_unit") or "minutes").strip().lower()
+            if unit not in ("minutes", "hours"):
+                unit = "minutes"
+            sec = th_val * 3600 if unit == "hours" else th_val * 60
+            sec = max(60, sec)
+            return sec, th_val, unit
+
+        with self._lock:
+            self._prune_inactivity_flags_for_deleted_devices_locked()
+            settings_copy = dict(self.settings)
+            enabled = bool(settings_copy.get("inactivity_notification_enabled"))
+            webhook = str(settings_copy.get("telegram_webhook_url") or "").strip()
+            if not enabled:
+                self._inactivity_runtime_block = None
+                return
+            threshold_sec, th_numeric, unit = threshold_seconds(settings_copy)
+            lang = normalize_ui_language(str(settings_copy.get("language") or ""))
+            duration_label = format_inactivity_duration(lang, th_numeric, unit)
+            devices = [
+                {"id": str(d.get("id", "")).strip(), "name": str(d.get("name", "") or d.get("id", "")).strip()}
+                for d in self.devices
+                if isinstance(d, dict) and str(d.get("id", "")).strip()
+            ]
+            statuses = {k: dict(v) for k, v in self.device_statuses.items()}
+            warned_snapshot = dict(self._device_inactivity_warned)
+
+        would_send_missing_hook = False
+        to_warn: list[tuple[str, str, str]] = []
+        to_clear: list[tuple[str, str, str]] = []
+
+        for d in devices:
+            did = d["id"]
+            name = d["name"]
+            if not name:
+                name = did
+            st = statuses.get(did) or {}
+            last_raw = st.get("last_seen")
+            t_seen = AppState._parse_status_time_utc(last_raw)
+            if t_seen is None:
+                continue
+            age_sec = (now - t_seen).total_seconds()
+            stale = age_sec >= threshold_sec
+            is_warned = bool(warned_snapshot.get(did))
+
+            if stale and not is_warned:
+                if not webhook:
+                    would_send_missing_hook = True
+                    continue
+                msg = translate(
+                    lang,
+                    "settings.notifications.inactivity.warningMessage",
+                    {"deviceName": name, "duration": duration_label},
+                )
+                to_warn.append((did, name, msg))
+            elif (not stale) and is_warned:
+                if not webhook:
+                    would_send_missing_hook = True
+                    continue
+                msg = translate(
+                    lang,
+                    "settings.notifications.inactivity.clearMessage",
+                    {"deviceName": name},
+                )
+                to_clear.append((did, name, msg))
+
+        block_rt: dict[str, Any] | None = None
+        if would_send_missing_hook:
+            log_line = translate(lang, "settings.notifications.inactivity.logSkippedNoWebhook")
+            detail = translate(lang, "settings.notifications.inactivity.blockedNoWebhookStatus")
+            block_rt = {"reason": "no_webhook", "detail": detail, "since": utc_now_iso()}
+            print(f"[inactivity-monitor] {log_line}")
+
+        new_warned = dict(warned_snapshot)
+
+        for did, name, msg in to_warn:
+            ok = self.send_telegram_webhook_notification(msg)
+            if ok:
+                new_warned[did] = True
+                print(f"[inactivity-monitor] Warnung gesendet für Gerät {name} ({did})")
+            else:
+                print(f"[inactivity-monitor] Warnung für {name} ({did}) konnte nicht gesendet werden")
+
+        for did, name, msg in to_clear:
+            ok = self.send_telegram_webhook_notification(msg)
+            if ok:
+                new_warned.pop(did, None)
+                print(f"[inactivity-monitor] Entwarnung gesendet für Gerät {name} ({did})")
+            else:
+                print(f"[inactivity-monitor] Entwarnung für {name} ({did}) konnte nicht gesendet werden")
+
+        with self._lock:
+            if not bool(self.settings.get("inactivity_notification_enabled")):
+                self._inactivity_runtime_block = None
+                return
+            self._device_inactivity_warned = {k: v for k, v in new_warned.items() if v}
+            self._persist_inactivity_notify_state_locked()
+            self._inactivity_runtime_block = block_rt
 
     def _persist_devices(self) -> None:
         write_json(self.devices_path, self.devices)
@@ -436,6 +590,9 @@ class AppState:
             if changed:
                 if device_id in self.device_statuses:
                     del self.device_statuses[device_id]
+                if device_id in self._device_inactivity_warned:
+                    del self._device_inactivity_warned[device_id]
+                    self._persist_inactivity_notify_state_locked()
                 self._persist_devices()
                 self._persist_statuses()
             return changed
@@ -467,6 +624,7 @@ class AppState:
 
     def get_runtime_stats(self) -> dict[str, Any]:
         with self._lock:
+            block = dict(self._inactivity_runtime_block) if self._inactivity_runtime_block else None
             return {
                 "device_count": len(self.devices),
                 "pending_nas_count": int(sum(self._count_unexported_gps_by_device_locked().values())),
@@ -474,6 +632,8 @@ class AppState:
                 "last_nas_run_at": self.last_nas_run_at,
                 "last_nas_saved_count": self.last_nas_saved_count,
                 "last_nas_error": self.last_nas_error,
+                "inactivity_notification_enabled": bool(self.settings.get("inactivity_notification_enabled")),
+                "inactivity_notify_block": block,
             }
 
     def append_forwarding_error(self, message: str) -> None:
@@ -554,6 +714,33 @@ class AppState:
             if "theme" in payload:
                 theme = str(payload["theme"]).strip()
                 self.settings["theme"] = theme or DEFAULT_SETTINGS["theme"]
+
+            if "language" in payload:
+                lang = str(payload.get("language") or "").strip().lower()
+                if lang not in ("de", "en"):
+                    raise ConfigFieldError("settings.system.error.languageInvalid")
+                self.settings["language"] = lang
+
+            if "inactivity_notification_enabled" in payload:
+                self.settings["inactivity_notification_enabled"] = bool(payload["inactivity_notification_enabled"])
+
+            if "inactivity_threshold_value" in payload or "inactivity_threshold_unit" in payload:
+                try:
+                    iv = int(
+                        payload.get("inactivity_threshold_value", self.settings.get("inactivity_threshold_value", 5))
+                    )
+                except (TypeError, ValueError):
+                    iv = 5
+                iv = max(1, min(iv, 525600))
+                unit = str(
+                    payload.get("inactivity_threshold_unit")
+                    or self.settings.get("inactivity_threshold_unit")
+                    or "minutes"
+                ).strip().lower()
+                if unit not in ("minutes", "hours"):
+                    raise ConfigFieldError("settings.notifications.inactivity.error.unitInvalid")
+                self.settings["inactivity_threshold_value"] = iv
+                self.settings["inactivity_threshold_unit"] = unit
 
             if "telegram_webhook_url" in payload:
                 raw_tw = str(payload.get("telegram_webhook_url") or "").strip()

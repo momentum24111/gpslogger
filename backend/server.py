@@ -12,6 +12,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from .openapi_spec import build_openapi_spec
+from .locale_bundle import normalize_ui_language, translate
 from .state import AppState, ConfigFieldError, is_http_url
 from .utils import http_post_json, utc_now_iso
 
@@ -45,8 +46,6 @@ INTERNAL_HEADER_PREFIX_BLOCKLIST = (
     "x-real-ip",
     "x-proxy-",
 )
-
-TELEGRAM_WEBHOOK_TEST_PAYLOAD = {"message": "Testnachricht aus GPSLogger"}
 
 RESTART_WEBHOOK_URL = "http://127.0.0.1:9000/"
 
@@ -538,6 +537,15 @@ def save_scheduler():
             state.mark_nas_run(saved_count=0, error=str(exc))
 
 
+def inactivity_monitor_worker():
+    while True:
+        try:
+            time.sleep(60)
+            state.tick_device_inactivity_notifications()
+        except Exception as exc:
+            print(f"[inactivity-monitor] error: {exc}")
+
+
 def discover_themes() -> list[str]:
     if not THEMES_DIR.exists():
         return ["light"]
@@ -873,7 +881,9 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": key, "error_key": key},
                     HTTPStatus.BAD_REQUEST,
                 )
-            ok, code, detail = http_post_json(url, dict(TELEGRAM_WEBHOOK_TEST_PAYLOAD), timeout=12.0)
+            lang = normalize_ui_language(state.get_settings().get("language"))
+            test_message = translate(lang, "settings.notifications.telegramTestMessage")
+            ok, code, detail = http_post_json(url, {"message": test_message}, timeout=12.0)
             if ok:
                 return json_response(self, {"ok": True, "http_status": code})
             if not code:
@@ -1177,6 +1187,7 @@ class Handler(BaseHTTPRequestHandler):
 def run_server(host: str = "0.0.0.0", port: int = 8080):
     threading.Thread(target=forwarding_worker, daemon=True).start()
     threading.Thread(target=save_scheduler, daemon=True).start()
+    threading.Thread(target=inactivity_monitor_worker, daemon=True).start()
     print(f"GPSLogger laeuft auf http://{host}:{port}")
     server = ThreadingHTTPServer((host, port), Handler)
     server.serve_forever()

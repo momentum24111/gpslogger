@@ -1174,6 +1174,12 @@ main {
   width: 100%;
 }
 
+.settings-notifications-inactivity-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
 .settings-webhook-url-control {
   display: flex;
   align-items: stretch;

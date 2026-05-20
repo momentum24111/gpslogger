@@ -264,6 +264,7 @@ export function createModal({
   closeOnBackdrop = true,
   routeHash = "",
   clearExistingHashOnOpen = false,
+  ariaLabel = "",
 }) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -271,10 +272,6 @@ export function createModal({
   modal.className = "modal";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
-
-  const head = document.createElement("div");
-  head.className = "modal-head";
-  head.innerHTML = `<h3>${title}</h3>`;
 
   const body = document.createElement("div");
   body.className = "modal-body";
@@ -288,7 +285,17 @@ export function createModal({
   foot.className = "modal-actions";
   actions.forEach((btn) => foot.appendChild(btn));
 
-  modal.append(head, body, foot);
+  if (title) {
+    const head = document.createElement("div");
+    head.className = "modal-head";
+    head.innerHTML = `<h3>${title}</h3>`;
+    modal.append(head, body, foot);
+  } else {
+    if (ariaLabel) {
+      modal.setAttribute("aria-label", ariaLabel);
+    }
+    modal.append(body, foot);
+  }
   overlay.appendChild(modal);
   let keyListener = null;
   let backdropListener = null;

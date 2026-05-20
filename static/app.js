@@ -159,6 +159,16 @@ function updateVisibleTexts() {
     const lbl = ui.settingsFormRefs.telegramWebhook.field.querySelector("span");
     if (lbl) lbl.textContent = t("settings.notifications.telegramWebhookUrl");
   }
+  const ial = document.getElementById("settings-inactivity-enable-label");
+  if (ial) ial.textContent = t("settings.notifications.inactivity.enableLabel");
+  const itl = document.getElementById("settings-inactivity-threshold-label");
+  if (itl) itl.textContent = t("settings.notifications.inactivity.thresholdLabel");
+  const ith = document.getElementById("settings-inactivity-threshold-hint");
+  if (ith) ith.textContent = t("settings.notifications.inactivity.thresholdHint");
+  const iaMinLab = document.querySelector('label[for="inactivity-unit-minutes"]');
+  if (iaMinLab) iaMinLab.textContent = t("settings.notifications.inactivity.unitMinutes");
+  const iaHrLab = document.querySelector('label[for="inactivity-unit-hours"]');
+  if (iaHrLab) iaHrLab.textContent = t("settings.notifications.inactivity.unitHours");
   const telegramHookTestBtn = document.getElementById("settings-telegram-webhook-test-btn");
   if (telegramHookTestBtn) {
     telegramHookTestBtn.title = t("settings.notifications.testWebhookAria");
@@ -405,8 +415,8 @@ async function runGpsloggerRestart(button) {
   content.append(spin, text);
 
   const modal = createModal({
-    title: t("settings.actions.restart"),
     content,
+    ariaLabel: t("settings.actions.restartInProgress"),
     actions: [],
     closeOnEscape: false,
     closeOnBackdrop: false,
@@ -441,16 +451,23 @@ async function runGpsloggerRestart(button) {
 }
 
 async function bootstrap() {
-  await loadLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || DEFAULT_LANGUAGE);
   ui.toastArea = createToastArea();
   document.body.appendChild(ui.toastArea);
   initInkRipple();
+
+  await Promise.all([loadSettings(), loadThemes()]);
+  const srvLang = String(state.settings.language || "").trim().toLowerCase();
+  const resolvedLang = SUPPORTED_LANGUAGES.includes(srvLang)
+    ? srvLang
+    : localStorage.getItem(LANGUAGE_STORAGE_KEY) || DEFAULT_LANGUAGE;
+  await loadLanguage(resolvedLang);
+
   const mapSidebarToggle = document.getElementById("map-sidebar-toggle");
   const brandHomeButton = document.getElementById("brand-home");
   if (mapSidebarToggle) mapSidebarToggle.setAttribute("aria-label", t("map.menuOpen"));
   if (brandHomeButton) brandHomeButton.setAttribute("aria-label", t("app.goToMap"));
 
-  await Promise.all([loadDevices(), loadDeviceStatuses(), loadSettings(), loadThemes(), loadSystemStatus(), loadForwardingErrors()]);
+  await Promise.all([loadDevices(), loadDeviceStatuses(), loadSystemStatus(), loadForwardingErrors()]);
   applyTheme(state.settings.theme || "light");
   buildMapPage();
   buildSettingsPage();
@@ -1133,18 +1150,44 @@ function dismissSettingsRoute() {
 
 async function persistMainSettingsFromUi() {
   const refs = ui.settingsFormRefs;
-  if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect || !refs?.nasStorageToggle || !refs?.telegramWebhook) {
+  if (
+    !refs?.nasInterval ||
+    !refs?.nasPath ||
+    !refs?.themeSelect ||
+    !refs?.nasStorageToggle ||
+    !refs?.telegramWebhook ||
+    !refs?.languageSelect ||
+    !refs?.inactivityNotificationSw ||
+    !refs?.inactivityThreshold
+  ) {
     throw new Error(t("settings.notLoaded"));
   }
-  const { nasInterval, nasPath, themeSelect, nasStorageToggle, nasIntervalValueInput, nasIntervalUnitRadios, telegramWebhook } =
-    refs;
+  const {
+    nasInterval,
+    nasPath,
+    themeSelect,
+    nasStorageToggle,
+    nasIntervalValueInput,
+    nasIntervalUnitRadios,
+    telegramWebhook,
+    languageSelect,
+    inactivityNotificationSw,
+    inactivityThreshold,
+    inactivityUnitRadios,
+  } = refs;
   setFieldState(nasInterval, "default", "");
   setFieldState(nasPath, "default", "");
   setFieldState(telegramWebhook, "default", "");
+  setFieldState(inactivityThreshold, "default", "");
   const enabled = nasStorageToggle.classList.contains("enabled");
   const iv = Number(nasIntervalValueInput.value || 1);
   if (!Number.isFinite(iv) || iv < 1) {
     setFieldState(nasInterval, "error", t("settings.storage.error.intervalValueMin"));
+    throw new Error(t("settings.storage.error.formCheck"));
+  }
+  const inactiveIv = Number(inactivityThreshold.input.value ?? 5);
+  if (!Number.isFinite(inactiveIv) || inactiveIv < 1) {
+    setFieldState(inactivityThreshold, "error", t("settings.storage.error.intervalValueMin"));
     throw new Error(t("settings.storage.error.formCheck"));
   }
   const twRaw = telegramWebhook.input.value.trim();
@@ -1155,6 +1198,10 @@ async function persistMainSettingsFromUi() {
   let unit = "hours";
   const checked = (nasIntervalUnitRadios || []).find((r) => r.checked);
   if (checked?.value === "days") unit = "days";
+  let inactivityUnit = "minutes";
+  const inChecked = (inactivityUnitRadios || []).find((r) => r.checked);
+  if (inChecked?.value === "hours") inactivityUnit = "hours";
+  const inactiveOn = inactivityNotificationSw.toggle.classList.contains("enabled");
   const payload = {
     nas_storage_enabled: enabled,
     nas_interval_value: Math.floor(iv),
@@ -1162,6 +1209,10 @@ async function persistMainSettingsFromUi() {
     nas_path: buildAbsoluteNasPathFromInfix(nasPath.input.value),
     theme: themeSelect.input.value,
     telegram_webhook_url: twRaw,
+    language: languageSelect.input.value,
+    inactivity_notification_enabled: inactiveOn,
+    inactivity_threshold_value: Math.floor(inactiveIv),
+    inactivity_threshold_unit: inactivityUnit,
   };
   let data;
   try {
@@ -1170,8 +1221,12 @@ async function persistMainSettingsFromUi() {
     const ek = String(err.errorKey || "");
     if (ek.includes("interval")) {
       setFieldState(nasInterval, "error", err.message);
+    } else if (ek.includes("inactivity")) {
+      setFieldState(inactivityThreshold, "error", err.message);
     } else if (ek.includes("notifications")) {
       setFieldState(telegramWebhook, "error", err.message);
+    } else if (ek.includes("languageInvalid")) {
+      setFieldState(languageSelect, "error", err.message);
     } else {
       setFieldState(nasPath, "error", err.message);
     }
@@ -1189,6 +1244,21 @@ async function persistMainSettingsFromUi() {
   telegramWebhook.input.value = String(state.settings.telegram_webhook_url || "");
   setFieldState(nasPath, "default", "");
   setFieldState(telegramWebhook, "default", "");
+  setFieldState(inactivityThreshold, "default", "");
+  setFieldState(languageSelect, "default", "");
+  const ilang = String(state.settings.language || "").trim().toLowerCase();
+  if (SUPPORTED_LANGUAGES.includes(ilang)) {
+    languageSelect.input.value = ilang;
+    await loadLanguage(ilang);
+    updateVisibleTexts();
+  }
+  inactivityNotificationSw.toggle.classList.toggle("enabled", !!state.settings.inactivity_notification_enabled);
+  inactivityThreshold.input.value = String(Math.max(1, Math.floor(Number(state.settings.inactivity_threshold_value) || 5)));
+  const iu = String(state.settings.inactivity_threshold_unit || "minutes").toLowerCase() === "hours" ? "hours" : "minutes";
+  (inactivityUnitRadios || []).forEach((r) => {
+    r.checked = r.value === iu;
+  });
+  ui.syncInactivityThresholdVisibility?.();
   pushToast(ui.toastArea, t("settings.saved"), "success");
   ui.settingsDirty = false;
   syncNasStorageSettingsControls();
@@ -2262,7 +2332,8 @@ function buildSettingsPage() {
   themeSelect.input.value = state.settings.theme || "light";
   const languageSelect = createField({ label: t("settings.system.language"), type: "select" });
   languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
-  languageSelect.input.value = currentLanguage;
+  const languageStored = String(state.settings.language || "").trim().toLowerCase();
+  languageSelect.input.value = SUPPORTED_LANGUAGES.includes(languageStored) ? languageStored : currentLanguage;
 
   const saveBtn = createButton({
     label: t("settings.save"),
@@ -2312,6 +2383,87 @@ function buildSettingsPage() {
     ui.settingsDirty = true;
     scheduleStorageOverviewRefresh();
   });
+  const inactivityNotificationSw = createSwitch({
+    label: t("settings.notifications.inactivity.enableLabel"),
+    value: !!state.settings.inactivity_notification_enabled,
+    onChange: () => {
+      ui.settingsDirty = true;
+      ui.syncInactivityThresholdVisibility?.();
+    },
+  });
+  const iaEnLabel = inactivityNotificationSw.wrap.querySelector("span");
+  if (iaEnLabel) iaEnLabel.id = "settings-inactivity-enable-label";
+
+  const inactivityIntervalNum = document.createElement("input");
+  inactivityIntervalNum.type = "number";
+  inactivityIntervalNum.min = "1";
+  inactivityIntervalNum.step = "1";
+  inactivityIntervalNum.className = "input settings-storage-interval-value";
+  inactivityIntervalNum.value = String(Math.max(1, Math.floor(Number(state.settings.inactivity_threshold_value) || 5)));
+
+  const inactivityUnitStored =
+    String(state.settings.inactivity_threshold_unit || "minutes").toLowerCase() === "hours" ? "hours" : "minutes";
+  const inactivityUnitRadios = [];
+  const inactivitySegHost = document.createElement("div");
+  inactivitySegHost.className = "segmented settings-storage-interval-segment";
+  ["minutes", "hours"].forEach((u) => {
+    const id = `inactivity-unit-${u}`;
+    const inp = document.createElement("input");
+    inp.type = "radio";
+    inp.name = "inactivity-threshold-unit";
+    inp.id = id;
+    inp.value = u;
+    inp.checked = inactivityUnitStored === u;
+    const lab = document.createElement("label");
+    lab.setAttribute("for", id);
+    lab.textContent =
+      u === "hours" ? t("settings.notifications.inactivity.unitHours") : t("settings.notifications.inactivity.unitMinutes");
+    inp.addEventListener("change", () => {
+      ui.settingsDirty = true;
+    });
+    inactivitySegHost.append(inp, lab);
+    inactivityUnitRadios.push(inp);
+  });
+
+  const inactivityControl = document.createElement("div");
+  inactivityControl.className = "settings-storage-interval-control";
+  inactivityControl.append(inactivityIntervalNum, inactivitySegHost);
+
+  const inactivityThresholdMsg = document.createElement("small");
+  inactivityThresholdMsg.className = "field-message";
+  const inactivityThresholdFieldEl = document.createElement("label");
+  inactivityThresholdFieldEl.className = "field";
+  const inactivityThresholdLbl = document.createElement("span");
+  inactivityThresholdLbl.id = "settings-inactivity-threshold-label";
+  inactivityThresholdLbl.textContent = t("settings.notifications.inactivity.thresholdLabel");
+  const inactivityHint = document.createElement("p");
+  inactivityHint.className = "settings-storage-path-hint";
+  inactivityHint.id = "settings-inactivity-threshold-hint";
+  inactivityHint.textContent = t("settings.notifications.inactivity.thresholdHint");
+  inactivityThresholdFieldEl.append(inactivityThresholdLbl, inactivityControl, inactivityHint, inactivityThresholdMsg);
+
+  function syncInactivityFieldsVisibility() {
+    const on = inactivityNotificationSw.toggle.classList.contains("enabled");
+    inactivityThresholdFieldEl.hidden = !on;
+  }
+  syncInactivityFieldsVisibility();
+  ui.syncInactivityThresholdVisibility = syncInactivityFieldsVisibility;
+
+  const inactivityThreshold = {
+    field: inactivityThresholdFieldEl,
+    input: inactivityIntervalNum,
+    message: inactivityThresholdMsg,
+  };
+
+  const inactivityStack = document.createElement("div");
+  inactivityStack.className = "settings-notifications-inactivity-stack";
+  inactivityStack.append(inactivityNotificationSw.wrap, inactivityThresholdFieldEl);
+  inactivityIntervalNum.addEventListener("input", () => {
+    ui.settingsDirty = true;
+  });
+
+  notificationsHost?.appendChild(inactivityStack);
+
   const telegramWebhook = createField({
     label: t("settings.notifications.telegramWebhookUrl"),
     value: String(state.settings.telegram_webhook_url || ""),
@@ -2398,6 +2550,9 @@ function buildSettingsPage() {
     telegramWebhook,
     themeSelect,
     languageSelect,
+    inactivityNotificationSw,
+    inactivityThreshold,
+    inactivityUnitRadios,
     saveBtn,
     saveNowBtn,
   };
@@ -3146,6 +3301,13 @@ function renderSystemStatus(host = null) {
   const lastNasRun = status.last_nas_run_at ? new Date(status.last_nas_run_at).toLocaleString(locale) : t("status.system.noRunYet");
   const rawNasErr = status.last_nas_error;
   const lastNasError = rawNasErr ? escapeHtml(t(String(rawNasErr), {}, String(rawNasErr))) : escapeHtml(t("status.system.noError"));
+  const inactiveOn = !!status.inactivity_notification_enabled;
+  const inactiveState = inactiveOn ? t("common.enabled") : t("common.disabled");
+  const block = status.inactivity_notify_block;
+  const inactiveBlockSmall =
+    block && block.reason === "no_webhook" && typeof block.detail === "string"
+      ? `<div class="list-item"><span>${escapeHtml(t("status.system.inactivityBlockedNoWebhookDetail"))}</span><small>${escapeHtml(block.detail)}</small></div>`
+      : "";
   target.innerHTML = `
     <div class="list">
       <div class="list-item"><span>${t("status.system.uptime")}</span><strong>${h}h ${m}m ${s}s</strong></div>
@@ -3153,6 +3315,8 @@ function renderSystemStatus(host = null) {
       <div class="list-item"><span>${t("status.system.forwardingQueue")}</span><strong>${status.forward_queue_size ?? 0}</strong></div>
       <div class="list-item"><span>${t("status.system.pendingNas")}</span><strong>${status.pending_nas_count ?? 0}</strong></div>
       <div class="list-item"><span>${t("status.system.storedStatuses")}</span><strong>${status.stored_status_count ?? 0}</strong></div>
+      <div class="list-item"><span>${t("status.system.inactivityNotifyEnabled")}</span><strong>${inactiveState}</strong></div>
+      ${inactiveBlockSmall}
       <div class="list-item"><span>${t("status.system.lastNasRun")}</span><strong>${lastNasRun}</strong></div>
       <div class="list-item"><span>${t("status.system.lastNasSaved")}</span><strong>${status.last_nas_saved_count ?? 0}</strong></div>
       <div class="list-item"><span>${t("status.system.nasErrorState")}</span><small>${lastNasError}</small></div>
