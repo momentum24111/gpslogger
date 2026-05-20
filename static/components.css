@@ -1174,6 +1174,19 @@ main {
   width: 100%;
 }
 
+.settings-webhook-url-control {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-sm);
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-webhook-url-control .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .settings-section-head {
   display: flex;
   align-items: center;
@@ -1455,6 +1468,13 @@ main {
   }
 
   .settings-section .ui-form-grid > .field > .settings-storage-interval-control {
+    grid-column: 2;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .settings-section .ui-form-grid > .field > .settings-webhook-url-control {
     grid-column: 2;
     width: 100%;
     max-width: 100%;

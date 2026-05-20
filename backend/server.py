@@ -12,8 +12,8 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from .openapi_spec import build_openapi_spec
-from .state import AppState, ConfigFieldError
-from .utils import utc_now_iso
+from .state import AppState, ConfigFieldError, is_http_url
+from .utils import http_post_json, utc_now_iso
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
@@ -45,6 +45,8 @@ INTERNAL_HEADER_PREFIX_BLOCKLIST = (
     "x-real-ip",
     "x-proxy-",
 )
+
+TELEGRAM_WEBHOOK_TEST_PAYLOAD = {"message": "Testnachricht aus GPSLogger"}
 
 RESTART_WEBHOOK_URL = "http://127.0.0.1:9000/"
 
@@ -851,6 +853,49 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(
                 self,
                 {"error": "Geräte über /api/devices/draft und /api/devices/commit anlegen"},
+                HTTPStatus.BAD_REQUEST,
+            )
+
+        if route == "/api/notifications/telegram-webhook/test":
+            body = self._read_json_body()
+            url = str(body.get("url", "")).strip()
+            if not url:
+                key = "settings.notifications.error.webhookUrlRequired"
+                return json_response(
+                    self,
+                    {"error": key, "error_key": key},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            if not is_http_url(url):
+                key = "settings.notifications.error.webhookUrlInvalid"
+                return json_response(
+                    self,
+                    {"error": key, "error_key": key},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            ok, code, detail = http_post_json(url, dict(TELEGRAM_WEBHOOK_TEST_PAYLOAD), timeout=12.0)
+            if ok:
+                return json_response(self, {"ok": True, "http_status": code})
+            if not code:
+                low = (detail or "").lower()
+                timeout_hint = any(x in low for x in ("timed out", "timeout", "zeitüberschreitung"))
+                key = (
+                    "settings.notifications.error.webhookTimeout"
+                    if timeout_hint
+                    else "settings.notifications.error.webhookNetwork"
+                )
+                return json_response(
+                    self,
+                    {"error": key, "error_key": key, "detail": detail},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            return json_response(
+                self,
+                {
+                    "error": "settings.notifications.error.webhookHttpError",
+                    "error_key": "settings.notifications.error.webhookHttpError",
+                    "error_vars": {"code": code},
+                },
                 HTTPStatus.BAD_REQUEST,
             )
 

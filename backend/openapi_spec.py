@@ -19,6 +19,7 @@ def build_openapi_spec() -> dict:
             {"name": "System", "description": "Laufzeit, Themes und Gesundheitschecks"},
             {"name": "Geräte", "description": "Geräte anlegen, umbenennen, löschen, API-Keys"},
             {"name": "Weiterleitungen", "description": "HTTP-Weiterleitungen für Rohe GPS-Requests"},
+            {"name": "Benachrichtigungen", "description": "Webhook für Telegram bzw. Automatisierungen (serverseitig)"},
             {"name": "Einstellungen", "description": "Globale Einstellungen (NDJSON-Speicherexport, Theme, Forwardings-Liste lesen)"},
             {
                 "name": "GPS-Ingest",
@@ -468,6 +469,62 @@ def build_openapi_spec() -> dict:
                                 }
                             },
                         }
+                    },
+                }
+            },
+            "/api/notifications/telegram-webhook/test": {
+                "post": {
+                    "tags": ["Benachrichtigungen"],
+                    "summary": "Telegram-Webhook-URL testen",
+                    "description": (
+                        "Sendet vom Server einen POST mit Content-Type application/json und festem Test-Body an die übergebene `url`."
+                    ),
+                    "operationId": "testTelegramWebhook",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["url"],
+                                    "properties": {
+                                        "url": {"type": "string", "description": "Zu testende Webhook-URL (http/https)"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Webhook hat mit 2xx geantwortet",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "ok": {"type": "boolean"},
+                                            "http_status": {"type": "integer"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "400": {
+                            "description": "Ungültige URL oder Webhook-Fehler",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "error": {"type": "string"},
+                                            "error_key": {"type": "string"},
+                                            "error_vars": {"type": "object", "additionalProperties": True},
+                                            "detail": {"type": "string"},
+                                        },
+                                    }
+                                }
+                            },
+                        },
                     },
                 }
             },

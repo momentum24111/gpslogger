@@ -80,7 +80,7 @@
     "saved": "Einstellungen gespeichert",
     "unsaved": {
       "title": "Ungespeicherte Änderungen",
-      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Theme oder Sprache. Speichern oder verwerfen?",
+      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Telegram-Webhook, Theme oder Sprache. Speichern oder verwerfen?",
       "discard": "Einstellungen verwerfen"
     },
     "title": "Einstellungen",
@@ -194,6 +194,19 @@
         "activity": "Activity",
         "timestamp": "Timestamp/Zeit",
         "deviceId": "Device ID"
+      }
+    },
+    "notifications": {
+      "title": "Benachrichtigungen",
+      "telegramWebhookUrl": "Telegram Webhook URL",
+      "testWebhookAria": "Testnachricht an Webhook senden",
+      "testSuccess": "Testnachricht erfolgreich gesendet",
+      "error": {
+        "webhookUrlInvalid": "Die URL muss mit http:// oder https:// beginnen und gültig sein.",
+        "webhookUrlRequired": "Bitte eine Webhook-URL eintragen.",
+        "webhookHttpError": "HTTP-Fehler ({code})",
+        "webhookTimeout": "Zeitüberschreitung beim Aufruf der Webhook-URL.",
+        "webhookNetwork": "Die Webhook-URL konnte nicht erreicht werden."
       }
     },
     "devices": {

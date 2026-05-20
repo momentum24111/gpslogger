@@ -23,6 +23,7 @@ export function createButton({ label, icon, onClick, selected = false, disabled 
 
 export function createIconButton({ icon, title, onClick }) {
   const btn = document.createElement("button");
+  btn.type = "button";
   btn.className = "icon-btn";
   btn.title = title ?? "";
   btn.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;

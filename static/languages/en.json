@@ -80,7 +80,7 @@
     "saved": "Settings saved",
     "unsaved": {
       "title": "Unsaved changes",
-      "message": "There are unsaved changes to storage path, storage interval, theme or language. Save or discard?",
+      "message": "There are unsaved changes to storage path, storage interval, Telegram webhook, theme, or language. Save or discard?",
       "discard": "Discard settings"
     },
     "title": "Settings",
@@ -194,6 +194,19 @@
         "activity": "Activity",
         "timestamp": "Timestamp/Time",
         "deviceId": "Device ID"
+      }
+    },
+    "notifications": {
+      "title": "Notifications",
+      "telegramWebhookUrl": "Telegram webhook URL",
+      "testWebhookAria": "Send test message to webhook",
+      "testSuccess": "Test message sent successfully",
+      "error": {
+        "webhookUrlInvalid": "The URL must be valid and start with http:// or https://.",
+        "webhookUrlRequired": "Please enter a webhook URL.",
+        "webhookHttpError": "HTTP error ({code})",
+        "webhookTimeout": "Timeout while calling the webhook URL.",
+        "webhookNetwork": "The webhook URL could not be reached."
       }
     },
     "devices": {

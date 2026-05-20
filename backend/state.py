@@ -21,7 +21,7 @@ from .gps_storage import (
     validate_absolute_writable_directory,
     validate_nas_path_string_for_settings,
 )
-from .utils import ensure_dir, read_json, secure_api_key, stable_device_id, utc_now_iso, write_json
+from .utils import ensure_dir, http_post_json, read_json, secure_api_key, stable_device_id, utc_now_iso, write_json
 
 DEVICE_DRAFT_TTL_SEC = 900
 
@@ -50,6 +50,7 @@ DEFAULT_SETTINGS = {
     "nas_interval_seconds": 3600,
     "nas_path": "",
     "forwardings": [],
+    "telegram_webhook_url": "",
     "theme": "light",
 }
 
@@ -554,11 +555,32 @@ class AppState:
                 theme = str(payload["theme"]).strip()
                 self.settings["theme"] = theme or DEFAULT_SETTINGS["theme"]
 
+            if "telegram_webhook_url" in payload:
+                raw_tw = str(payload.get("telegram_webhook_url") or "").strip()
+                if raw_tw and not is_http_url(raw_tw):
+                    raise ConfigFieldError("settings.notifications.error.webhookUrlInvalid")
+                self.settings["telegram_webhook_url"] = raw_tw
+
             if bool(self.settings.get("nas_storage_enabled")):
                 self._validate_nas_path_when_storage_enabled(str(self.settings.get("nas_path") or ""))
 
             self._persist_settings()
             return dict(self.settings)
+
+    def send_telegram_webhook_notification(self, message: str) -> bool:
+        """Sendet ausschließlich über die persistierte `telegram_webhook_url` (JSON-Body `{\"message\": ...}`)."""
+        text = str(message or "").strip()
+        if not text:
+            return False
+        with self._lock:
+            url = str(self.settings.get("telegram_webhook_url") or "").strip()
+        if not url:
+            return False
+        ok, code, detail = http_post_json(url, {"message": text}, timeout=12.0)
+        if not ok:
+            hint = f"Telegram-Webhook: HTTP {code}" if code else f"Telegram-Webhook: {detail or 'Fehler'}"
+            self.append_forwarding_error(hint.strip()[:500])
+        return ok
 
     def list_forwardings(self) -> list[dict[str, Any]]:
         with self._lock:

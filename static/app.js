@@ -139,6 +139,8 @@ function updateVisibleTexts() {
   if (settingsSystemTitle) settingsSystemTitle.textContent = t("settings.system.title");
   const settingsStorageTitle = document.getElementById("settings-storage-title");
   if (settingsStorageTitle) settingsStorageTitle.textContent = t("settings.storage.title");
+  const settingsNotificationsTitle = document.getElementById("settings-notifications-title");
+  if (settingsNotificationsTitle) settingsNotificationsTitle.textContent = t("settings.notifications.title");
   const settingsForwardingsTitle = document.getElementById("settings-forwardings-title");
   if (settingsForwardingsTitle) settingsForwardingsTitle.textContent = t("settings.forwardings.title");
   const settingsDevicesTitle = document.getElementById("settings-devices-title");
@@ -152,6 +154,15 @@ function updateVisibleTexts() {
   if (ui.settingsFormRefs?.nasPath?.field) {
     const lbl = ui.settingsFormRefs.nasPath.field.querySelector("span");
     if (lbl) lbl.textContent = t("settings.storage.nasPath");
+  }
+  if (ui.settingsFormRefs?.telegramWebhook?.field) {
+    const lbl = ui.settingsFormRefs.telegramWebhook.field.querySelector("span");
+    if (lbl) lbl.textContent = t("settings.notifications.telegramWebhookUrl");
+  }
+  const telegramHookTestBtn = document.getElementById("settings-telegram-webhook-test-btn");
+  if (telegramHookTestBtn) {
+    telegramHookTestBtn.title = t("settings.notifications.testWebhookAria");
+    telegramHookTestBtn.setAttribute("aria-label", t("settings.notifications.testWebhookAria"));
   }
   if (ui.settingsFormRefs?.themeSelect?.field) {
     const lbl = ui.settingsFormRefs.themeSelect.field.querySelector("span");
@@ -359,8 +370,10 @@ async function api(url, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const key = data.error_key || null;
-    const err = new Error(key ? t(key) : data.error || t("errors.api"));
+    const vars = data.error_vars && typeof data.error_vars === "object" ? data.error_vars : {};
+    const err = new Error(key ? t(key, vars) : data.error || t("errors.api"));
     err.errorKey = key;
+    err.errorVars = vars;
     throw err;
   }
   return data;
@@ -1120,16 +1133,23 @@ function dismissSettingsRoute() {
 
 async function persistMainSettingsFromUi() {
   const refs = ui.settingsFormRefs;
-  if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect || !refs?.nasStorageToggle) {
+  if (!refs?.nasInterval || !refs?.nasPath || !refs?.themeSelect || !refs?.nasStorageToggle || !refs?.telegramWebhook) {
     throw new Error(t("settings.notLoaded"));
   }
-  const { nasInterval, nasPath, themeSelect, nasStorageToggle, nasIntervalValueInput, nasIntervalUnitRadios } = refs;
+  const { nasInterval, nasPath, themeSelect, nasStorageToggle, nasIntervalValueInput, nasIntervalUnitRadios, telegramWebhook } =
+    refs;
   setFieldState(nasInterval, "default", "");
   setFieldState(nasPath, "default", "");
+  setFieldState(telegramWebhook, "default", "");
   const enabled = nasStorageToggle.classList.contains("enabled");
   const iv = Number(nasIntervalValueInput.value || 1);
   if (!Number.isFinite(iv) || iv < 1) {
     setFieldState(nasInterval, "error", t("settings.storage.error.intervalValueMin"));
+    throw new Error(t("settings.storage.error.formCheck"));
+  }
+  const twRaw = telegramWebhook.input.value.trim();
+  if (twRaw && !isHttpUrl(twRaw)) {
+    setFieldState(telegramWebhook, "error", t("settings.notifications.error.webhookUrlInvalid"));
     throw new Error(t("settings.storage.error.formCheck"));
   }
   let unit = "hours";
@@ -1141,6 +1161,7 @@ async function persistMainSettingsFromUi() {
     nas_interval_unit: unit,
     nas_path: buildAbsoluteNasPathFromInfix(nasPath.input.value),
     theme: themeSelect.input.value,
+    telegram_webhook_url: twRaw,
   };
   let data;
   try {
@@ -1149,6 +1170,8 @@ async function persistMainSettingsFromUi() {
     const ek = String(err.errorKey || "");
     if (ek.includes("interval")) {
       setFieldState(nasInterval, "error", err.message);
+    } else if (ek.includes("notifications")) {
+      setFieldState(telegramWebhook, "error", err.message);
     } else {
       setFieldState(nasPath, "error", err.message);
     }
@@ -1163,7 +1186,9 @@ async function persistMainSettingsFromUi() {
     r.checked = r.value === u;
   });
   nasPath.input.value = nasPathSettingsToInfix(state.settings.nas_path || "");
+  telegramWebhook.input.value = String(state.settings.telegram_webhook_url || "");
   setFieldState(nasPath, "default", "");
+  setFieldState(telegramWebhook, "default", "");
   pushToast(ui.toastArea, t("settings.saved"), "success");
   ui.settingsDirty = false;
   syncNasStorageSettingsControls();
@@ -2051,6 +2076,10 @@ function buildSettingsPage() {
         </div>
       </section>
       <section class="settings-section">
+        <h3 id="settings-notifications-title">${t("settings.notifications.title")}</h3>
+        <div id="settings-notifications" class="ui-form-grid"></div>
+      </section>
+      <section class="settings-section">
         <h3 id="settings-storage-title">${t("settings.storage.title")}</h3>
         <div id="settings-storage" class="ui-form-grid"></div>
       </section>
@@ -2075,6 +2104,7 @@ function buildSettingsPage() {
   });
   const systemHost = page.querySelector("#settings-system");
   const storageHost = page.querySelector("#settings-storage");
+  const notificationsHost = page.querySelector("#settings-notifications");
   const forwardingAddHost = page.querySelector("#forwarding-add-host");
 
   const storageEnableField = document.createElement("label");
@@ -2282,6 +2312,57 @@ function buildSettingsPage() {
     ui.settingsDirty = true;
     scheduleStorageOverviewRefresh();
   });
+  const telegramWebhook = createField({
+    label: t("settings.notifications.telegramWebhookUrl"),
+    value: String(state.settings.telegram_webhook_url || ""),
+    type: "text",
+    placeholder: "",
+  });
+  telegramWebhook.input.setAttribute("autocomplete", "off");
+  const twRow = document.createElement("div");
+  twRow.className = "settings-webhook-url-control";
+  const twTestBtn = createIconButton({
+    icon: "send",
+    title: t("settings.notifications.testWebhookAria"),
+    onClick: async () => {
+      setFieldState(telegramWebhook, "default", "");
+      const u = telegramWebhook.input.value.trim();
+      if (!u) {
+        const msg = t("settings.notifications.error.webhookUrlRequired");
+        setFieldState(telegramWebhook, "error", msg);
+        pushToast(ui.toastArea, msg, "error");
+        return;
+      }
+      if (!isHttpUrl(u)) {
+        const msg = t("settings.notifications.error.webhookUrlInvalid");
+        setFieldState(telegramWebhook, "error", msg);
+        pushToast(ui.toastArea, msg, "error");
+        return;
+      }
+      twTestBtn.disabled = true;
+      try {
+        await api("/api/notifications/telegram-webhook/test", { method: "POST", body: JSON.stringify({ url: u }) });
+        pushToast(ui.toastArea, t("settings.notifications.testSuccess"), "success");
+      } catch (err) {
+        setFieldState(telegramWebhook, "error", err.message);
+        pushToast(ui.toastArea, err.message, "error");
+      } finally {
+        twTestBtn.disabled = false;
+      }
+    },
+  });
+  twTestBtn.id = "settings-telegram-webhook-test-btn";
+  twTestBtn.classList.add("settings-telegram-webhook-test-btn");
+  twTestBtn.setAttribute("aria-label", t("settings.notifications.testWebhookAria"));
+  const twInputEl = telegramWebhook.input;
+  twInputEl.remove();
+  twRow.append(twInputEl, twTestBtn);
+  telegramWebhook.field.insertBefore(twRow, telegramWebhook.message);
+  telegramWebhook.input = twInputEl;
+  telegramWebhook.input.addEventListener("input", () => {
+    ui.settingsDirty = true;
+  });
+  notificationsHost?.appendChild(telegramWebhook.field);
   systemHost.append(themeSelect.field, languageSelect.field);
   storageHost.append(storageEnableField, nasInterval.field, nasPath.field, ndjsonField);
   const addFwBtn = createButton({
@@ -2314,6 +2395,7 @@ function buildSettingsPage() {
     nasIntervalValueInput: intervalNum,
     nasIntervalUnitRadios,
     nasPath,
+    telegramWebhook,
     themeSelect,
     languageSelect,
     saveBtn,
