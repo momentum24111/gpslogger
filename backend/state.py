@@ -22,6 +22,7 @@ from .gps_storage import (
     validate_absolute_writable_directory,
     validate_nas_path_string_for_settings,
 )
+from . import positions_db
 from .utils import ensure_dir, http_post_json, read_json, secure_api_key, stable_device_id, utc_now_iso, write_json
 
 DEVICE_DRAFT_TTL_SEC = 900
@@ -85,6 +86,7 @@ class AppState:
         self.devices_path = self.data_dir / "devices.json"
         self.settings_path = self.data_dir / "settings.json"
         self.gps_path = self.data_dir / "gps.ndjson"
+        self.gps_db_path = self.data_dir / "gps_positions.sqlite3"
         self.pending_path = self.data_dir / "pending_nas.json"
         self.ingest_seq_path = self.data_dir / "ingest_seq_next.json"
         self.status_path = self.data_dir / "device_statuses.json"
@@ -105,6 +107,7 @@ class AppState:
         self._device_drafts: dict[str, tuple[float, str]] = {}
         self._device_inactivity_warned: dict[str, bool] = self._load_inactivity_notify_state_locked()
         self._inactivity_runtime_block: dict[str, Any] | None = None
+        self._positions_db_ready = False
 
         self._migrate_settings_forwardings()
         self._migrate_devices_map_color()
@@ -115,6 +118,7 @@ class AppState:
         self._persist_settings()
         self._persist_pending()
         self._persist_statuses()
+        self._init_positions_index()
 
     def _load_inactivity_notify_state_locked(self) -> dict[str, bool]:
         raw = read_json(self.inactivity_notify_state_path, {})
@@ -402,13 +406,86 @@ class AppState:
         with self.gps_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
+    def _open_positions_db(self):
+        return positions_db.connect(self.gps_db_path)
+
+    def _reset_positions_index_files(self) -> None:
+        """Löscht SQLite-Indexdateien (nach NDJSON-Rewrite), damit Sync von vorn startet."""
+        self._positions_db_ready = False
+        for path in (
+            self.gps_db_path,
+            Path(str(self.gps_db_path) + "-wal"),
+            Path(str(self.gps_db_path) + "-shm"),
+        ):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"[positions-db] could not remove {path.name}: {exc}")
+
+    def _init_positions_index(self) -> None:
+        """Schema anlegen und gps.ndjson einmalig/inkrementell in SQLite übernehmen."""
+        with self._lock:
+            try:
+                ensure_dir(self.data_dir)
+                conn = self._open_positions_db()
+                try:
+                    positions_db.init_schema(conn)
+                    result = positions_db.sync_from_ndjson(conn, self.gps_path)
+                    self._positions_db_ready = True
+                    imported = int(result.get("imported") or 0)
+                    skipped = int(result.get("skipped") or 0)
+                    if imported or skipped:
+                        print(
+                            f"[positions-db] sync complete: imported={imported} skipped={skipped} "
+                            f"byte_offset={result.get('byte_offset')}"
+                        )
+                    else:
+                        print(
+                            f"[positions-db] ready ({positions_db.count_positions(conn)} rows, "
+                            "no new ndjson import)"
+                        )
+                finally:
+                    conn.close()
+            except Exception as exc:
+                self._positions_db_ready = False
+                print(f"[positions-db] init/sync failed (queries may fall back to ndjson): {exc}")
+
+    def _index_gps_item_locked(self, item: dict[str, Any]) -> None:
+        """Schreibt eine Position in SQLite; Fehler werden geloggt, NDJSON bleibt gültig."""
+        try:
+            conn = self._open_positions_db()
+            try:
+                if not self._positions_db_ready:
+                    positions_db.init_schema(conn)
+                ok = positions_db.upsert_position(conn, item)
+                if ok:
+                    seq = None
+                    try:
+                        seq = int(item.get("ingest_seq"))
+                    except (TypeError, ValueError):
+                        seq = None
+                    positions_db.mark_synced_to_file(conn, self.gps_path, last_ingest_seq=seq)
+                    conn.commit()
+                    self._positions_db_ready = True
+                else:
+                    conn.rollback()
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"[positions-db] index write failed (ndjson kept): {exc}")
+
     def _rebuild_statuses_from_gps(self) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
         with self.gps_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
-                item = json.loads(line)
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(item, dict):
+                    continue
                 device_id = str(item.get("device_id", "")).strip()
                 if not device_id:
                     continue
@@ -1018,6 +1095,8 @@ class AppState:
             tmp.unlink(missing_ok=True)
             return
         write_json(self.ingest_seq_path, {"next": n})
+        # NDJSON wurde neu geschrieben → SQLite-Byte-Offset ungültig; Index beim Start neu aufbauen.
+        self._reset_positions_index_files()
 
     def _repair_ingest_seq_next_locked(self) -> None:
         max_seq = self._gps_max_ingest_seq_locked()
@@ -1280,6 +1359,7 @@ class AppState:
             payload = dict(payload)
             payload["ingest_seq"] = self._allocate_ingest_seq_locked()
             self._append_gps_line(payload)
+            self._index_gps_item_locked(payload)
             device_id = str(payload.get("device_id", "")).strip()
             if device_id:
                 st: dict[str, Any] = {
@@ -1425,6 +1505,42 @@ class AppState:
             }
 
     def query_positions(
+        self,
+        device_names: list[str] | None,
+        ts_from: str | None,
+        ts_to: str | None,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        if self._positions_db_ready or self.gps_db_path.exists():
+            try:
+                # Kurzlebige Connection; kein Teilen über Threads.
+                conn = self._open_positions_db()
+                try:
+                    if not self._positions_db_ready:
+                        positions_db.init_schema(conn)
+                    return positions_db.query_positions(
+                        conn,
+                        device_names,
+                        ts_from,
+                        ts_to,
+                        limit=limit,
+                        offset=offset,
+                    )
+                finally:
+                    conn.close()
+            except Exception as exc:
+                print(f"[positions-db] query failed, falling back to ndjson: {exc}")
+        return self._query_positions_from_ndjson(
+            device_names,
+            ts_from,
+            ts_to,
+            limit=limit,
+            offset=offset,
+        )
+
+    def _query_positions_from_ndjson(
         self,
         device_names: list[str] | None,
         ts_from: str | None,

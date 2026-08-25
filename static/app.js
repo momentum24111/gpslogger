@@ -1567,8 +1567,8 @@ async function refreshMapData(opts = {}) {
   }
 }
 
-const POSITIONS_PAGE_SIZE = 500;
-const POSITIONS_MAX_PAGES = 200;
+const POSITIONS_PAGE_SIZE = 2000;
+const POSITIONS_MAX_PAGES = 100;
 
 function formatPositionCountLabel(count) {
   const safeCount = Number.isFinite(Number(count)) ? Math.max(0, Number(count)) : 0;
