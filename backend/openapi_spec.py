@@ -776,6 +776,24 @@ def build_openapi_spec() -> dict:
                             "schema": {"type": "integer", "minimum": 0, "default": 0},
                             "description": "Anzahl passender Positionen, die übersprungen werden",
                         },
+                        {
+                            "name": "stride",
+                            "in": "query",
+                            "required": False,
+                            "schema": {
+                                "type": "integer",
+                                "enum": [1, 2, 5, 10, 20, 50, 100],
+                            },
+                            "description": (
+                                "Optionale Ausdünnung je Gerät, nur für die Kartendarstellung. "
+                                "Erlaubte Werte: 1, 2, 5, 10, 20, 50, 100. "
+                                "Ohne diesen Parameter oder mit 1 bleibt die volle Auflösung (bisheriges Verhalten). "
+                                "Bei einem Wert größer als 1 werden je Gerät nur jeder n-te Punkt sowie immer "
+                                "der zeitlich erste und letzte Punkt des Filters geliefert. "
+                                "limit und offset gelten dann für diese reduzierte Folge. "
+                                "Gespeicherte Positionen, Weiterleitungen und Aufrufe ohne stride bleiben unverändert."
+                            ),
+                        },
                     ],
                     "responses": {
                         "200": {
@@ -1010,6 +1028,11 @@ def build_openapi_spec() -> dict:
                                 "from": {"type": "string", "format": "date-time"},
                                 "to": {"type": "string", "format": "date-time"},
                                 "device": {"type": "array", "items": {"type": "string"}},
+                                "stride": {
+                                    "type": "integer",
+                                    "enum": [2, 5, 10, 20, 50, 100],
+                                    "description": "Nur gesetzt, wenn eine Ausdünnung mit stride > 1 angefordert wurde.",
+                                },
                             },
                             "required": ["from", "to", "device"],
                         },

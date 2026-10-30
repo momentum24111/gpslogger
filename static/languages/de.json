@@ -59,6 +59,13 @@
     "fit": {
       "title": "Auf sichtbare Punkte einpassen",
       "noVisiblePoints": "Keine sichtbaren Punkte zum Einpassen."
+    },
+    "stats": {
+      "positionOne": "{count} Position",
+      "positionMany": "{count} Positionen",
+      "meters": "{distance} m",
+      "kilometers": "{distance} km",
+      "aria": "{positions}, {distance}"
     }
   },
   "time": {
@@ -81,7 +88,7 @@
     "saved": "Einstellungen gespeichert",
     "unsaved": {
       "title": "Ungespeicherte Änderungen",
-      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Telegram-Benachrichtigung bei ausbleibenden Positionen, Telegram-Webhook, Theme oder Sprache. Speichern oder verwerfen?",
+      "message": "Es gibt nicht gespeicherte Änderungen an Speicherpfad, Speicherintervall, Telegram-Benachrichtigung bei ausbleibenden Positionen, Telegram-Webhook, Theme, Sprache oder Punktdichte der Karte. Speichern oder verwerfen?",
       "discard": "Einstellungen verwerfen"
     },
     "title": "Einstellungen",
@@ -92,8 +99,20 @@
       "title": "System",
       "theme": "Theme",
       "language": "Sprache",
+      "mapPointStride": {
+        "label": "Punktdichte der Karte",
+        "hint": "Wirkt nur auf die Karte. Gespeicherte GPS-Punkte bleiben vollständig erhalten.",
+        "option1": "Jeder Punkt (100 %)",
+        "option2": "Jeder 2. Punkt",
+        "option5": "Jeder 5. Punkt",
+        "option10": "Jeder 10. Punkt",
+        "option20": "Jeder 20. Punkt",
+        "option50": "Jeder 50. Punkt",
+        "option100": "Jeder 100. Punkt"
+      },
       "error": {
-        "languageInvalid": "Unterstützt sind nur Deutsch und Englisch."
+        "languageInvalid": "Unterstützt sind nur Deutsch und Englisch.",
+        "mapPointStrideInvalid": "Die Punktdichte muss einer der vorgegebenen Werte sein."
       }
     },
     "storage": {

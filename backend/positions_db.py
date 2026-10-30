@@ -11,6 +11,11 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 1
 
+# Nur diese Schrittweiten sind für die Kartendarstellung erlaubt.
+# 1 bedeutet volle Auflösung (bisheriges API-Verhalten).
+MAP_POINT_STRIDES = frozenset({1, 2, 5, 10, 20, 50, 100})
+DEFAULT_MAP_POINT_STRIDE = 10
+
 META_SCHEMA_VERSION = "schema_version"
 META_NDJSON_BYTE_OFFSET = "ndjson_byte_offset"
 META_NDJSON_FILE_SIZE = "ndjson_file_size"
@@ -280,6 +285,62 @@ def db_row_to_position(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+def parse_position_stride(raw: str | None) -> int | None:
+    """Optionales `stride` für die Karte. None = volle Auflösung. ValueError bei ungültigen Werten."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        value = int(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("stride") from exc
+    if value not in MAP_POINT_STRIDES:
+        raise ValueError("stride")
+    if value <= 1:
+        return None
+    return value
+
+
+def position_partition_key(row: dict[str, Any]) -> str:
+    device_id = str(row.get("device_id") or "").strip()
+    if device_id:
+        return device_id
+    return str(row.get("device_name") or "").strip().lower()
+
+
+def _position_time_sort_key(row: dict[str, Any], order_index: int) -> tuple[int, float, int]:
+    epoch = row.get("timestamp_epoch")
+    if epoch is None:
+        epoch = timestamp_to_epoch(row.get("timestamp") or row.get("received_at"))
+    if epoch is None:
+        return (0, 0.0, order_index)
+    try:
+        return (1, float(epoch), order_index)
+    except (TypeError, ValueError):
+        return (0, 0.0, order_index)
+
+
+def thin_positions_by_stride(rows: list[dict[str, Any]], stride: int) -> list[dict[str, Any]]:
+    """Behält je Gerät jeden n-ten Punkt sowie immer den zeitlich ersten und letzten."""
+    if stride <= 1 or len(rows) <= 1:
+        return list(rows)
+    groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, row in enumerate(rows):
+        groups.setdefault(position_partition_key(row), []).append((index, row))
+    keep: set[int] = set()
+    for entries in groups.values():
+        ordered = sorted(entries, key=lambda item: _position_time_sort_key(item[1], item[0]))
+        count = len(ordered)
+        chosen = set(range(0, count, stride))
+        chosen.add(0)
+        chosen.add(count - 1)
+        for pos in chosen:
+            keep.add(ordered[pos][0])
+    return [row for index, row in enumerate(rows) if index in keep]
+
+
 def query_positions(
     conn: sqlite3.Connection,
     device_names: list[str] | None,
@@ -288,11 +349,20 @@ def query_positions(
     *,
     limit: int = 500,
     offset: int = 0,
+    stride: int | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     left = timestamp_to_epoch(ts_from)
     right = timestamp_to_epoch(ts_to)
     safe_limit = max(1, min(5000, int(limit)))
     safe_offset = max(0, int(offset))
+    safe_stride = 1
+    if stride is not None:
+        try:
+            safe_stride = int(stride)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("stride") from exc
+        if safe_stride not in MAP_POINT_STRIDES:
+            raise ValueError("stride")
 
     where: list[str] = []
     params: list[Any] = []
@@ -318,14 +388,38 @@ def query_positions(
             params.append(right)
 
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-    # limit+1 für effizientes has_more; Dateireihenfolge = ingest_seq
-    sql = (
-        "SELECT * FROM positions"
-        f"{where_sql}"
-        " ORDER BY ingest_seq ASC"
-        " LIMIT ? OFFSET ?"
-    )
-    params.extend([safe_limit + 1, safe_offset])
+    # limit+1 für effizientes has_more; Dateireihenfolge = ingest_seq.
+    # stride > 1 dünnt in SQL je Gerät aus, damit die Karte nicht alle Rohpunkte erhält.
+    # Zeitlich erster und letzter Punkt je Gerät bleiben erhalten. Ohne stride bleibt die Abfrage unverändert.
+    if safe_stride > 1:
+        partition = "COALESCE(NULLIF(TRIM(device_id), ''), IFNULL(device_name_lower, ''))"
+        sql = (
+            "WITH filtered AS ("
+            " SELECT *,"
+            " ROW_NUMBER() OVER ("
+            f" PARTITION BY {partition}"
+            " ORDER BY timestamp_epoch ASC, ingest_seq ASC"
+            " ) AS _sample_rn,"
+            " COUNT(*) OVER ("
+            f" PARTITION BY {partition}"
+            " ) AS _sample_count"
+            " FROM positions"
+            f"{where_sql}"
+            ") "
+            "SELECT * FROM filtered"
+            " WHERE (((_sample_rn - 1) % ? = 0) OR _sample_rn = _sample_count)"
+            " ORDER BY ingest_seq ASC"
+            " LIMIT ? OFFSET ?"
+        )
+        params.extend([safe_stride, safe_limit + 1, safe_offset])
+    else:
+        sql = (
+            "SELECT * FROM positions"
+            f"{where_sql}"
+            " ORDER BY ingest_seq ASC"
+            " LIMIT ? OFFSET ?"
+        )
+        params.extend([safe_limit + 1, safe_offset])
     rows = conn.execute(sql, params).fetchall()
     has_more = len(rows) > safe_limit
     if has_more:

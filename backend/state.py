@@ -55,6 +55,7 @@ DEFAULT_SETTINGS = {
     "telegram_webhook_url": "",
     "theme": "light",
     "language": "de",
+    "map_point_stride": 10,
     "inactivity_notification_enabled": False,
     "inactivity_threshold_value": 5,
     "inactivity_threshold_unit": "minutes",
@@ -114,6 +115,7 @@ class AppState:
         self._migrate_legacy_nas_path_default()
         self._migrate_nas_storage_interval_and_flags()
         self._migrate_gps_ingest_seq_and_pending_queue()
+        self._migrate_map_point_stride()
         self._persist_devices()
         self._persist_settings()
         self._persist_pending()
@@ -271,6 +273,16 @@ class AppState:
 
     def _persist_settings(self) -> None:
         write_json(self.settings_path, self.settings)
+
+    def _migrate_map_point_stride(self) -> None:
+        raw = self.settings.get("map_point_stride", positions_db.DEFAULT_MAP_POINT_STRIDE)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = positions_db.DEFAULT_MAP_POINT_STRIDE
+        if value not in positions_db.MAP_POINT_STRIDES:
+            value = positions_db.DEFAULT_MAP_POINT_STRIDE
+        self.settings["map_point_stride"] = value
 
     def _persist_pending(self) -> None:
         write_json(self.pending_path, self.pending_nas)
@@ -797,6 +809,15 @@ class AppState:
                 if lang not in ("de", "en"):
                     raise ConfigFieldError("settings.system.error.languageInvalid")
                 self.settings["language"] = lang
+
+            if "map_point_stride" in payload:
+                try:
+                    stride = int(payload.get("map_point_stride"))
+                except (TypeError, ValueError):
+                    raise ConfigFieldError("settings.system.error.mapPointStrideInvalid")
+                if stride not in positions_db.MAP_POINT_STRIDES:
+                    raise ConfigFieldError("settings.system.error.mapPointStrideInvalid")
+                self.settings["map_point_stride"] = stride
 
             if "inactivity_notification_enabled" in payload:
                 self.settings["inactivity_notification_enabled"] = bool(payload["inactivity_notification_enabled"])
@@ -1512,6 +1533,7 @@ class AppState:
         *,
         limit: int = 500,
         offset: int = 0,
+        stride: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         if self._positions_db_ready or self.gps_db_path.exists():
             try:
@@ -1527,6 +1549,7 @@ class AppState:
                         ts_to,
                         limit=limit,
                         offset=offset,
+                        stride=stride,
                     )
                 finally:
                     conn.close()
@@ -1538,6 +1561,7 @@ class AppState:
             ts_to,
             limit=limit,
             offset=offset,
+            stride=stride,
         )
 
     def _query_positions_from_ndjson(
@@ -1548,6 +1572,7 @@ class AppState:
         *,
         limit: int = 500,
         offset: int = 0,
+        stride: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         if not self.gps_path.exists():
             return [], False
@@ -1573,8 +1598,10 @@ class AppState:
                 normalized_device_names = None
         safe_limit = max(1, min(5000, int(limit)))
         safe_offset = max(0, int(offset))
+        use_stride = isinstance(stride, int) and stride > 1
 
         rows: list[dict[str, Any]] = []
+        matched: list[dict[str, Any]] = []
         skipped = 0
         has_more = False
         skipped_invalid_timestamp = 0
@@ -1599,19 +1626,27 @@ class AppState:
                 if right and item_time and item_time > right:
                     continue
                 row = self._position_row_from_stored(item)
-                if row is not None:
-                    if skipped < safe_offset:
-                        skipped += 1
-                        continue
-                    if len(rows) >= safe_limit:
-                        has_more = True
-                        break
-                    rows.append(row)
+                if row is None:
+                    continue
+                if use_stride:
+                    matched.append(row)
+                    continue
+                if skipped < safe_offset:
+                    skipped += 1
+                    continue
+                if len(rows) >= safe_limit:
+                    has_more = True
+                    break
+                rows.append(row)
         if skipped_invalid_timestamp:
             print(
                 f"[positions] skipped {skipped_invalid_timestamp} entries with invalid or missing timestamps "
                 "for from/to filtering"
             )
+        if use_stride:
+            thinned = positions_db.thin_positions_by_stride(matched, int(stride))
+            page = thinned[safe_offset : safe_offset + safe_limit]
+            return page, safe_offset + safe_limit < len(thinned)
         return rows, has_more
 
     def get_device_statuses(self) -> dict[str, dict[str, Any]]:

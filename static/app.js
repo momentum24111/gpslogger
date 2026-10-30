@@ -119,12 +119,9 @@ function updateVisibleTexts() {
     const input = document.querySelector(`input[name="map-range"][value="${value}"]`);
     if (!input?.id) return;
     const label = document.querySelector(`label[for="${input.id}"]`);
-    if (label) {
-      const badge = label.querySelector(".map-range-count");
-      label.textContent = text;
-      if (badge) label.appendChild(badge);
-    }
+    if (label) label.textContent = text;
   });
+  renderMapRouteStats();
 
   const fromLabel = document.querySelector('#map-from')?.closest(".field")?.querySelector("span");
   const toLabel = document.querySelector('#map-to')?.closest(".field")?.querySelector("span");
@@ -183,6 +180,13 @@ function updateVisibleTexts() {
     if (lbl) lbl.textContent = t("settings.system.language");
     ui.settingsFormRefs.languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
     ui.settingsFormRefs.languageSelect.input.value = currentLanguage;
+  }
+  const mapPointStrideLabel = document.getElementById("settings-map-point-stride-label");
+  if (mapPointStrideLabel) mapPointStrideLabel.textContent = t("settings.system.mapPointStride.label");
+  const mapPointStrideHint = document.getElementById("settings-map-point-stride-hint");
+  if (mapPointStrideHint) mapPointStrideHint.textContent = t("settings.system.mapPointStride.hint");
+  if (ui.settingsFormRefs?.mapPointStride?.input) {
+    fillMapPointStrideOptions(ui.settingsFormRefs.mapPointStride.input, ui.settingsFormRefs.mapPointStride.input.value);
   }
   const addFwBtn = document.querySelector("#forwarding-add-host .btn");
   if (addFwBtn) {
@@ -297,6 +301,10 @@ const ui = {
   toastArea: null,
   map: null,
   mapFitControl: null,
+  mapRouteStatsControl: null,
+  mapRouteStatsEl: null,
+  mapRouteStatsCount: 0,
+  mapRouteStatsDistanceMeters: 0,
   layers: {},
   markers: new Map(),
   liveLabelMarkers: [],
@@ -710,9 +718,10 @@ function clearMapOverlays() {
   closePinnedRouteTooltip();
 }
 
-async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
+async function drawCurrentPositionsOnly({ preserveView = false, signal, isCurrent } = {}) {
+  await loadDeviceStatuses(signal);
+  if (isCurrent && !isCurrent()) return 0;
   clearMapOverlays();
-  await loadDeviceStatuses();
   const allLatLng = [];
   let renderedCount = 0;
   state.devices.forEach((device) => {
@@ -756,6 +765,7 @@ async function drawCurrentPositionsOnly({ preserveView = false } = {}) {
     const bounds = L.latLngBounds(allLatLng);
     if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
   }
+  setMapRouteStats({ count: renderedCount, distanceMeters: 0 });
   return renderedCount;
 }
 
@@ -999,6 +1009,112 @@ function initMapFitControl() {
   ui.map.addControl(ui.mapFitControl);
 }
 
+const ROUTE_STATS_COUNT_FORMAT = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+const ROUTE_STATS_METERS_FORMAT = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 });
+const ROUTE_STATS_KM_FORMAT = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+const EARTH_RADIUS_M = 6371000;
+
+function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLng = (lng2 - lng1) * rad;
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const a = sinDLat * sinDLat + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * sinDLng * sinDLng;
+  return EARTH_RADIUS_M * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a))));
+}
+
+function routeDistanceMeters(latLngs) {
+  let total = 0;
+  let prevLat = 0;
+  let prevLng = 0;
+  let hasPrev = false;
+  for (let i = 0; i < latLngs.length; i += 1) {
+    const lat = Number(latLngs[i]?.[0]);
+    const lng = Number(latLngs[i]?.[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      hasPrev = false;
+      continue;
+    }
+    if (hasPrev) total += haversineDistanceMeters(prevLat, prevLng, lat, lng);
+    prevLat = lat;
+    prevLng = lng;
+    hasPrev = true;
+  }
+  return total;
+}
+
+function formatRoutePositionCount(count) {
+  const safeCount = Number.isFinite(Number(count)) ? Math.max(0, Math.round(Number(count))) : 0;
+  const formatted = ROUTE_STATS_COUNT_FORMAT.format(safeCount);
+  return safeCount === 1
+    ? t("map.stats.positionOne", { count: formatted })
+    : t("map.stats.positionMany", { count: formatted });
+}
+
+function formatRouteDistance(distanceMeters) {
+  const safe = Number.isFinite(distanceMeters) && distanceMeters > 0 ? distanceMeters : 0;
+  const roundedMeters = Math.round(safe);
+  if (roundedMeters < 1000) {
+    return t("map.stats.meters", { distance: ROUTE_STATS_METERS_FORMAT.format(roundedMeters) });
+  }
+  return t("map.stats.kilometers", { distance: ROUTE_STATS_KM_FORMAT.format(safe / 1000) });
+}
+
+function renderMapRouteStats() {
+  const el = ui.mapRouteStatsEl;
+  if (!el) return;
+  const positionsLabel = formatRoutePositionCount(ui.mapRouteStatsCount);
+  const distanceLabel = formatRouteDistance(ui.mapRouteStatsDistanceMeters);
+  const positionsEl = el.querySelector("[data-route-stats='positions']");
+  const distanceEl = el.querySelector("[data-route-stats='distance']");
+  if (positionsEl) positionsEl.textContent = positionsLabel;
+  if (distanceEl) distanceEl.textContent = distanceLabel;
+  const summary = `${positionsLabel} · ${distanceLabel}`;
+  el.title = summary;
+  el.setAttribute("aria-label", t("map.stats.aria", { positions: positionsLabel, distance: distanceLabel }));
+}
+
+function setMapRouteStats({ count = 0, distanceMeters = 0 } = {}) {
+  ui.mapRouteStatsCount = Number.isFinite(Number(count)) ? Math.max(0, Math.round(Number(count))) : 0;
+  ui.mapRouteStatsDistanceMeters = Number.isFinite(distanceMeters) && distanceMeters > 0 ? distanceMeters : 0;
+  renderMapRouteStats();
+}
+
+function initMapRouteStatsControl() {
+  if (!ui.map) return;
+  if (ui.mapRouteStatsControl) {
+    ui.map.removeControl(ui.mapRouteStatsControl);
+    ui.mapRouteStatsControl = null;
+    ui.mapRouteStatsEl = null;
+  }
+  const StatsControl = L.Control.extend({
+    onAdd() {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-route-stats");
+      container.setAttribute("role", "group");
+      const positions = L.DomUtil.create("span", "map-route-stats-positions", container);
+      positions.dataset.routeStats = "positions";
+      positions.setAttribute("aria-hidden", "true");
+      const sep = L.DomUtil.create("span", "map-route-stats-sep", container);
+      sep.setAttribute("aria-hidden", "true");
+      sep.textContent = "·";
+      const distance = L.DomUtil.create("span", "map-route-stats-distance", container);
+      distance.dataset.routeStats = "distance";
+      distance.setAttribute("aria-hidden", "true");
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    },
+  });
+  ui.mapRouteStatsControl = new StatsControl({ position: "topleft" });
+  ui.map.addControl(ui.mapRouteStatsControl);
+  ui.mapRouteStatsEl = ui.mapRouteStatsControl.getContainer();
+  renderMapRouteStats();
+}
+
 function toggleMapSidebarDrawer() {
   const layout = ui.mapLayoutEl;
   if (!layout) return;
@@ -1157,6 +1273,7 @@ async function persistMainSettingsFromUi() {
     !refs?.nasStorageToggle ||
     !refs?.telegramWebhook ||
     !refs?.languageSelect ||
+    !refs?.mapPointStride ||
     !refs?.inactivityNotificationSw ||
     !refs?.inactivityThreshold
   ) {
@@ -1171,6 +1288,7 @@ async function persistMainSettingsFromUi() {
     nasIntervalUnitRadios,
     telegramWebhook,
     languageSelect,
+    mapPointStride,
     inactivityNotificationSw,
     inactivityThreshold,
     inactivityUnitRadios,
@@ -1210,6 +1328,7 @@ async function persistMainSettingsFromUi() {
     theme: themeSelect.input.value,
     telegram_webhook_url: twRaw,
     language: languageSelect.input.value,
+    map_point_stride: normalizeMapPointStride(mapPointStride.input.value),
     inactivity_notification_enabled: inactiveOn,
     inactivity_threshold_value: Math.floor(inactiveIv),
     inactivity_threshold_unit: inactivityUnit,
@@ -1227,6 +1346,8 @@ async function persistMainSettingsFromUi() {
       setFieldState(telegramWebhook, "error", err.message);
     } else if (ek.includes("languageInvalid")) {
       setFieldState(languageSelect, "error", err.message);
+    } else if (ek.includes("mapPointStride")) {
+      setFieldState(mapPointStride, "error", err.message);
     } else {
       setFieldState(nasPath, "error", err.message);
     }
@@ -1252,6 +1373,7 @@ async function persistMainSettingsFromUi() {
     await loadLanguage(ilang);
     updateVisibleTexts();
   }
+  fillMapPointStrideOptions(mapPointStride.input, state.settings.map_point_stride);
   inactivityNotificationSw.toggle.classList.toggle("enabled", !!state.settings.inactivity_notification_enabled);
   inactivityThreshold.input.value = String(Math.max(1, Math.floor(Number(state.settings.inactivity_threshold_value) || 5)));
   const iu = String(state.settings.inactivity_threshold_unit || "minutes").toLowerCase() === "hours" ? "hours" : "minutes";
@@ -1265,12 +1387,21 @@ async function persistMainSettingsFromUi() {
   refreshStorageOverview({ silent: true }).catch(() => {});
 }
 
+async function reloadPersistedSettings({ refreshMapIfStrideChanged = false } = {}) {
+  const previousStride = getActiveMapPointStride();
+  await loadSettings();
+  applyTheme(state.settings.theme || "light");
+  buildSettingsPage();
+  ui.settingsDirty = false;
+  const savedStride = normalizeMapPointStride(state.settings?.map_point_stride);
+  if (refreshMapIfStrideChanged && savedStride !== previousStride) {
+    refreshMapData({ preserveView: true });
+  }
+}
+
 async function discardSettingsAndClose() {
   try {
-    await loadSettings();
-    applyTheme(state.settings.theme || "light");
-    buildSettingsPage();
-    ui.settingsDirty = false;
+    await reloadPersistedSettings({ refreshMapIfStrideChanged: true });
     dismissSettingsRoute();
   } catch (err) {
     pushToast(ui.toastArea, err.message, "error");
@@ -1295,10 +1426,7 @@ function openUnsavedSettingsCloseConfirm(afterResolved) {
   });
   discardBtn.addEventListener("click", async () => {
     try {
-      await loadSettings();
-      applyTheme(state.settings.theme || "light");
-      buildSettingsPage();
-      ui.settingsDirty = false;
+      await reloadPersistedSettings({ refreshMapIfStrideChanged: true });
       ui.settingsUnsavedDialogOpen = false;
       modal.close();
       afterResolved?.();
@@ -1396,7 +1524,6 @@ function buildMapPage() {
       ui.mapRange = entry.value;
       localStorage.setItem("gpslogger.map.range", ui.mapRange);
       customDateWrap.hidden = ui.mapRange !== "custom";
-      setSelectedRangeCountStatus({ loading: true, count: null });
       refreshMapData({ fromField, toField });
       if (isMobileMapLayout()) closeMapSidebarDrawer();
     });
@@ -1466,6 +1593,7 @@ function buildMapPage() {
     attributionControl: false,
   }).setView([51.2, 10.4], 6);
   initMapFitControl();
+  initMapRouteStatsControl();
   ui.map.on("click", () => closePinnedRouteTooltip());
   document.addEventListener("click", (event) => {
     const target = event.target;
@@ -1505,20 +1633,66 @@ function setMapMode(mode) {
   localStorage.setItem("gpslogger.map.mode", mode);
 }
 
+const MAP_POINT_STRIDES = [1, 2, 5, 10, 20, 50, 100];
+const DEFAULT_MAP_POINT_STRIDE = 10;
+
+function normalizeMapPointStride(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return MAP_POINT_STRIDES.includes(parsed) ? parsed : DEFAULT_MAP_POINT_STRIDE;
+}
+
+function getActiveMapPointStride() {
+  const select = ui.settingsFormRefs?.mapPointStride?.input;
+  if (select instanceof HTMLSelectElement && select.isConnected) {
+    return normalizeMapPointStride(select.value);
+  }
+  return normalizeMapPointStride(state.settings?.map_point_stride);
+}
+
+function fillMapPointStrideOptions(select, value) {
+  const selected = normalizeMapPointStride(value);
+  select.innerHTML = MAP_POINT_STRIDES.map(
+    (stride) => `<option value="${stride}">${t(`settings.system.mapPointStride.option${stride}`)}</option>`,
+  ).join("");
+  select.value = String(selected);
+}
+
+function isAbortError(err) {
+  return err?.name === "AbortError";
+}
+
+function beginMapLoad() {
+  ui.mapLoadGeneration = (ui.mapLoadGeneration || 0) + 1;
+  const generation = ui.mapLoadGeneration;
+  if (ui.mapLoadAbort) ui.mapLoadAbort.abort();
+  const controller = new AbortController();
+  ui.mapLoadAbort = controller;
+  return {
+    signal: controller.signal,
+    isCurrent() {
+      return generation === ui.mapLoadGeneration;
+    },
+  };
+}
+
 async function refreshMapData(opts = {}) {
-  setSelectedRangeCountStatus({ loading: true, count: null });
+  const load = beginMapLoad();
   if (ui.mapRange === MAP_RANGE_CURRENT) {
     if (opts.reloadBtn) {
       setButtonLoading(opts.reloadBtn, true, "Lädt...");
     }
     try {
-      const renderedCount = await drawCurrentPositionsOnly({ preserveView: !!opts.preserveView });
-      setSelectedRangeCountStatus({ loading: false, count: renderedCount });
+      await drawCurrentPositionsOnly({
+        preserveView: !!opts.preserveView,
+        signal: load.signal,
+        isCurrent: () => load.isCurrent(),
+      });
+      if (!load.isCurrent()) return;
     } catch (err) {
-      setSelectedRangeCountStatus({ loading: false, count: null });
+      if (!load.isCurrent() || isAbortError(err)) return;
       pushToast(ui.toastArea, err.message, "error");
     } finally {
-      if (opts.reloadBtn) {
+      if (load.isCurrent() && opts.reloadBtn) {
         setButtonLoading(opts.reloadBtn, false);
       }
     }
@@ -1539,9 +1713,9 @@ async function refreshMapData(opts = {}) {
   setFieldState(fromField, "default", "");
   setFieldState(toField, "default", "");
   if (error) {
+    if (!load.isCurrent()) return;
     setFieldState(fromField, "error", error);
     setFieldState(toField, "error", error);
-    setSelectedRangeCountStatus({ loading: false, count: null });
     return;
   }
 
@@ -1552,16 +1726,21 @@ async function refreshMapData(opts = {}) {
   if (from) query.set("from", from);
   if (to) query.set("to", to);
   try {
-    const positions = await loadAllPositionsForRange(query);
+    const positionsPromise = loadAllPositionsForRange(query, load);
+    const statusesPromise = loadDeviceStatuses(load.signal).catch((err) => {
+      if (isAbortError(err) || !load.isCurrent()) throw err;
+    });
+    const positions = await positionsPromise;
+    await statusesPromise;
+    if (!load.isCurrent() || positions == null) return;
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
-    const renderedCount = drawPositions(positions, { preserveView: !!opts.preserveView });
-    setSelectedRangeCountStatus({ loading: false, count: renderedCount });
+    drawPositions(positions, { preserveView: !!opts.preserveView });
   } catch (err) {
-    setSelectedRangeCountStatus({ loading: false, count: null });
+    if (!load.isCurrent() || isAbortError(err)) return;
     pushToast(ui.toastArea, err.message, "error");
   } finally {
-    if (opts.reloadBtn) {
+    if (load.isCurrent() && opts.reloadBtn) {
       setButtonLoading(opts.reloadBtn, false);
     }
   }
@@ -1569,36 +1748,6 @@ async function refreshMapData(opts = {}) {
 
 const POSITIONS_PAGE_SIZE = 2000;
 const POSITIONS_MAX_PAGES = 100;
-
-function formatPositionCountLabel(count) {
-  const safeCount = Number.isFinite(Number(count)) ? Math.max(0, Number(count)) : 0;
-  return `${safeCount} ${safeCount === 1 ? "Position" : "Positionen"}`;
-}
-
-function setSelectedRangeCountStatus({ loading = false, count = null } = {}) {
-  const rangePicker = document.getElementById("map-range-picker");
-  if (!rangePicker) return;
-  const labels = rangePicker.querySelectorAll("label");
-  labels.forEach((label) => {
-    label.classList.remove("is-loading");
-    const badge = label.querySelector(".map-range-count");
-    if (badge) badge.remove();
-  });
-  const selectedInput = rangePicker.querySelector('input[name="map-range"]:checked');
-  if (!selectedInput) return;
-  const selectedLabel = rangePicker.querySelector(`label[for="${selectedInput.id}"]`);
-  if (!selectedLabel) return;
-  if (!loading && count == null) return;
-  const badge = document.createElement("span");
-  badge.className = "map-range-count";
-  if (loading) {
-    badge.textContent = "Lädt...";
-    selectedLabel.classList.add("is-loading");
-  } else {
-    badge.textContent = formatPositionCountLabel(count);
-  }
-  selectedLabel.appendChild(badge);
-}
 
 function buildPositionDedupKey(pos) {
   return [
@@ -1628,12 +1777,14 @@ function normalizeAndSortPositions(positions) {
   return merged;
 }
 
-async function loadAllPositionsForRange(baseQuery) {
+async function loadAllPositionsForRange(baseQuery, load) {
   const allPositions = [];
   let offset = 0;
   let hasMore = true;
   let pages = 0;
+  const stride = getActiveMapPointStride();
   while (hasMore) {
+    if (load && !load.isCurrent()) return null;
     pages += 1;
     if (pages > POSITIONS_MAX_PAGES) {
       throw new Error("Zu viele Positionsseiten geladen. Bitte Zeitraum eingrenzen.");
@@ -1641,7 +1792,8 @@ async function loadAllPositionsForRange(baseQuery) {
     const pageQuery = new URLSearchParams(baseQuery.toString());
     pageQuery.set("limit", String(POSITIONS_PAGE_SIZE));
     pageQuery.set("offset", String(offset));
-    const data = await api(`/api/positions?${pageQuery.toString()}`);
+    if (stride > 1) pageQuery.set("stride", String(stride));
+    const data = await api(`/api/positions?${pageQuery.toString()}`, load?.signal ? { signal: load.signal } : {});
     const positions = Array.isArray(data?.positions) ? data.positions : [];
     allPositions.push(...positions);
     const pagination = data?.pagination || {};
@@ -1655,6 +1807,7 @@ async function loadAllPositionsForRange(baseQuery) {
     }
     offset += returned;
   }
+  if (load && !load.isCurrent()) return null;
   return normalizeAndSortPositions(allPositions);
 }
 
@@ -1707,7 +1860,10 @@ function drawPositions(positions, opts = {}) {
   clearMapOverlays();
   const visible = state.visibleDeviceIds;
   const filtered = positions.filter((p) => p.device_id && visible.has(p.device_id));
-  if (!filtered.length) return 0;
+  if (!filtered.length) {
+    setMapRouteStats({ count: 0, distanceMeters: 0 });
+    return 0;
+  }
 
   const byDevice = new Map();
   filtered.forEach((p) => {
@@ -1717,9 +1873,11 @@ function drawPositions(positions, opts = {}) {
 
   const allLatLng = [];
   const customPast = isCustomRangeInPast();
+  let distanceMeters = 0;
   byDevice.forEach((items, deviceId) => {
     items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     const route = items.map((item) => [item.latitude, item.longitude]);
+    distanceMeters += routeDistanceMeters(route);
     allLatLng.push(...route);
     const colorIdx = getDeviceColorIndex(deviceId);
     const stroke = resolvePaletteColor(colorIdx);
@@ -1779,6 +1937,7 @@ function drawPositions(positions, opts = {}) {
     const bounds = L.latLngBounds(allLatLng);
     if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
   }
+  setMapRouteStats({ count: filtered.length, distanceMeters });
   return filtered.length;
 }
 
@@ -2334,6 +2493,26 @@ function buildSettingsPage() {
   languageSelect.input.innerHTML = SUPPORTED_LANGUAGES.map((lang) => `<option value="${lang}">${t(`language.${lang}`)}</option>`).join("");
   const languageStored = String(state.settings.language || "").trim().toLowerCase();
   languageSelect.input.value = SUPPORTED_LANGUAGES.includes(languageStored) ? languageStored : currentLanguage;
+  const mapPointStride = createField({ label: t("settings.system.mapPointStride.label"), type: "select" });
+  mapPointStride.input.id = "settings-map-point-stride";
+  const mapPointStrideLabel = mapPointStride.field.querySelector("span");
+  if (mapPointStrideLabel) mapPointStrideLabel.id = "settings-map-point-stride-label";
+  fillMapPointStrideOptions(mapPointStride.input, state.settings.map_point_stride);
+  const mapPointStrideHint = document.createElement("p");
+  mapPointStrideHint.className = "settings-field-hint";
+  mapPointStrideHint.id = "settings-map-point-stride-hint";
+  mapPointStrideHint.textContent = t("settings.system.mapPointStride.hint");
+  const mapPointStrideStack = document.createElement("div");
+  mapPointStrideStack.className = "settings-field-stack";
+  const mapPointStrideInput = mapPointStride.input;
+  mapPointStrideInput.remove();
+  mapPointStrideStack.append(mapPointStrideInput, mapPointStrideHint);
+  mapPointStride.field.insertBefore(mapPointStrideStack, mapPointStride.message);
+  mapPointStride.input = mapPointStrideInput;
+  mapPointStride.input.addEventListener("change", () => {
+    ui.settingsDirty = true;
+    refreshMapData({ preserveView: true });
+  });
 
   const saveBtn = createButton({
     label: t("settings.save"),
@@ -2529,7 +2708,7 @@ function buildSettingsPage() {
   notificationsHost?.appendChild(inactivityEnableField);
   notificationsHost?.appendChild(inactivityThresholdFieldEl);
 
-  systemHost.append(themeSelect.field, languageSelect.field);
+  systemHost.append(themeSelect.field, languageSelect.field, mapPointStride.field);
   storageHost.append(storageEnableField, nasInterval.field, nasPath.field, ndjsonField);
   const addFwBtn = createButton({
     label: t("settings.forwardings.add"),
@@ -2564,6 +2743,7 @@ function buildSettingsPage() {
     telegramWebhook,
     themeSelect,
     languageSelect,
+    mapPointStride,
     inactivityNotificationSw,
     inactivityThreshold,
     inactivityUnitRadios,
@@ -3466,8 +3646,9 @@ async function loadDevices() {
   renderMapDeviceList();
 }
 
-async function loadDeviceStatuses() {
-  const data = await api("/api/devices/status");
+async function loadDeviceStatuses(signal) {
+  const data = await api("/api/devices/status", signal ? { signal } : {});
+  if (signal?.aborted) return;
   state.deviceStatuses = data.statuses || {};
 }
 

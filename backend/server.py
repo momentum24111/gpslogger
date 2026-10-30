@@ -13,6 +13,7 @@ from urllib import request as urlrequest
 
 from .openapi_spec import build_openapi_spec
 from .locale_bundle import normalize_ui_language, translate
+from .positions_db import parse_position_stride
 from .state import AppState, ConfigFieldError, is_http_url
 from .utils import http_post_json, utc_now_iso
 
@@ -784,6 +785,15 @@ class Handler(BaseHTTPRequestHandler):
                 offset = max(0, int(query_offset))
             except ValueError:
                 return json_response(self, {"error": "offset muss eine ganze Zahl sein"}, HTTPStatus.BAD_REQUEST)
+            raw_stride = query.get("stride", [None])[0]
+            try:
+                stride = parse_position_stride(None if raw_stride is None else str(raw_stride))
+            except ValueError:
+                return json_response(
+                    self,
+                    {"error": "stride muss 1, 2, 5, 10, 20, 50 oder 100 sein"},
+                    HTTPStatus.BAD_REQUEST,
+                )
             device_names = parse_device_filters(query)
             rows, has_more = state.query_positions(
                 device_names=device_names,
@@ -791,7 +801,15 @@ class Handler(BaseHTTPRequestHandler):
                 ts_to=query_to,
                 limit=limit,
                 offset=offset,
+                stride=stride,
             )
+            filters: dict = {
+                "from": query_from,
+                "to": query_to,
+                "device": device_names,
+            }
+            if stride is not None:
+                filters["stride"] = stride
             return json_response(
                 self,
                 {
@@ -802,11 +820,7 @@ class Handler(BaseHTTPRequestHandler):
                         "returned": len(rows),
                         "has_more": has_more,
                     },
-                    "filters": {
-                        "from": query_from,
-                        "to": query_to,
-                        "device": device_names,
-                    },
+                    "filters": filters,
                 },
             )
         if route.startswith("/themes/"):

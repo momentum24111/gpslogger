@@ -557,6 +557,8 @@ main {
 }
 
 .map-wrap {
+  --leaflet-zoom-btn-size: 34px;
+  --leaflet-control-offset: 10px;
   position: relative;
   z-index: 0;
   isolation: isolate;
@@ -571,8 +573,71 @@ main {
   z-index: 2;
 }
 
-.leaflet-control-zoom-fit {
+.map-wrap .leaflet-top.leaflet-left {
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content);
+  grid-template-areas:
+    "zoom stats"
+    "fit .";
+  align-items: start;
+  justify-content: start;
+  column-gap: var(--spacing-sm);
+  width: max-content;
+  max-width: calc(100% - var(--leaflet-control-offset) - 12rem);
+  box-sizing: border-box;
+  padding: var(--leaflet-control-offset) 0 0 var(--leaflet-control-offset);
+}
+
+.map-wrap .leaflet-top.leaflet-left > .leaflet-control {
+  margin: 0;
+  float: none;
+  clear: none;
+}
+
+.map-wrap .leaflet-top.leaflet-left > .leaflet-control-zoom {
+  grid-area: zoom;
+}
+
+.map-wrap .leaflet-top.leaflet-left > .leaflet-control-zoom-fit {
+  grid-area: fit;
   margin-top: 10px;
+}
+
+.map-wrap .leaflet-route-stats.leaflet-bar {
+  grid-area: stats;
+  align-self: start;
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  height: calc(var(--leaflet-zoom-btn-size) + 1px);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.6rem;
+  cursor: default;
+  background: var(--leaflet-control-bg, var(--card-bg, var(--color-surface)));
+  color: var(--leaflet-control-fg, var(--color-text));
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.map-route-stats-positions {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-route-stats-sep {
+  flex: none;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.map-route-stats-distance {
+  flex: none;
 }
 
 .map-wrap .leaflet-bar {
@@ -583,8 +648,8 @@ main {
 
 .map-wrap .leaflet-control-zoom a,
 .leaflet-control-zoom-fit-btn {
-  width: 34px;
-  height: 34px;
+  width: var(--leaflet-zoom-btn-size);
+  height: var(--leaflet-zoom-btn-size);
   border: none;
   cursor: pointer;
   background: var(--leaflet-control-bg, var(--card-bg, var(--color-surface)));
@@ -641,6 +706,16 @@ main {
   box-shadow: var(--shadow-map-overlay, none);
   display: grid;
   gap: var(--spacing-sm);
+}
+
+@media (max-width: 640px) {
+  .map-overlay {
+    top: calc(var(--leaflet-control-offset) + var(--leaflet-zoom-btn-size) + 1px + var(--spacing-sm));
+  }
+
+  .map-wrap .leaflet-top.leaflet-left {
+    max-width: calc(100% - var(--leaflet-control-offset));
+  }
 }
 
 .list {
@@ -1361,11 +1436,26 @@ main {
   box-shadow: none;
 }
 
-.settings-storage-path-hint {
+.settings-storage-path-hint,
+.settings-field-hint {
   margin: 0.25rem 0 0;
   font-size: 0.8rem;
   line-height: 1.35;
   color: var(--color-text-muted);
+}
+
+.settings-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-field-stack > .select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .settings-storage-path-stack {
@@ -1517,7 +1607,8 @@ main {
     min-width: 0;
   }
 
-  .settings-section .ui-form-grid > .field > .settings-storage-path-stack {
+  .settings-section .ui-form-grid > .field > .settings-storage-path-stack,
+  .settings-section .ui-form-grid > .field > .settings-field-stack {
     grid-column: 2;
     width: 100%;
     max-width: 100%;
@@ -1787,16 +1878,6 @@ main {
 .segmented input:checked + label {
   background: var(--seg-active-bg, var(--color-primary-soft));
   color: var(--seg-active-fg, var(--color-text));
-}
-
-.map-range-count {
-  font-size: 0.75rem;
-  opacity: 0.95;
-  white-space: nowrap;
-}
-
-.map-range-picker label.is-loading .map-range-count {
-  opacity: 0.85;
 }
 
 .segmented input:focus-visible + label {

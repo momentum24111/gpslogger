@@ -59,6 +59,13 @@
     "fit": {
       "title": "Fit visible points",
       "noVisiblePoints": "No visible points to fit."
+    },
+    "stats": {
+      "positionOne": "{count} position",
+      "positionMany": "{count} positions",
+      "meters": "{distance} m",
+      "kilometers": "{distance} km",
+      "aria": "{positions}, {distance}"
     }
   },
   "time": {
@@ -81,7 +88,7 @@
     "saved": "Settings saved",
     "unsaved": {
       "title": "Unsaved changes",
-      "message": "There are unsaved changes to storage path, storage interval, missing-position Telegram notifications, Telegram webhook, theme, or language. Save or discard?",
+      "message": "There are unsaved changes to storage path, storage interval, missing-position Telegram notifications, Telegram webhook, theme, language, or map point density. Save or discard?",
       "discard": "Discard settings"
     },
     "title": "Settings",
@@ -92,8 +99,20 @@
       "title": "System",
       "theme": "Theme",
       "language": "Language",
+      "mapPointStride": {
+        "label": "Map point density",
+        "hint": "Affects the map only. Stored GPS points remain complete.",
+        "option1": "Every point (100%)",
+        "option2": "Every 2nd point",
+        "option5": "Every 5th point",
+        "option10": "Every 10th point",
+        "option20": "Every 20th point",
+        "option50": "Every 50th point",
+        "option100": "Every 100th point"
+      },
       "error": {
-        "languageInvalid": "Only German and English are supported."
+        "languageInvalid": "Only German and English are supported.",
+        "mapPointStrideInvalid": "Point density must be one of the predefined values."
       }
     },
     "storage": {
