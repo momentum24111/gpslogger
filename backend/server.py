@@ -11,6 +11,7 @@ from urllib import parse as urlparse
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
+from .gpx_export import GpxExportEmpty, content_disposition, gpx_filename, iter_gpx_chunks
 from .openapi_spec import build_openapi_spec
 from .locale_bundle import normalize_ui_language, translate
 from .positions_db import parse_position_stride
@@ -134,6 +135,16 @@ def parse_query_time(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def parse_id_list(query: dict[str, list[str]], key: str) -> list[str]:
+    parsed: list[str] = []
+    for value in query.get(key, []):
+        for chunk in str(value).split(","):
+            item = chunk.strip()
+            if item:
+                parsed.append(item)
+    return list(dict.fromkeys(parsed))
 
 
 def parse_device_filters(query: dict[str, list[str]]) -> list[str]:
@@ -561,6 +572,111 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    def _gpx_download(self, query: dict[str, list[str]]):
+        device_ids = parse_id_list(query, "device_id")
+        if not device_ids:
+            return json_response(
+                self,
+                {"error": "Keine Geräte ausgewählt.", "error_key": "map.stats.gpx.noDevices"},
+                HTTPStatus.BAD_REQUEST,
+            )
+        scope = (query.get("scope", [""])[0] or "").strip().lower()
+        filename_from = (query.get("filename_from", [None])[0] or None)
+        filename_to = (query.get("filename_to", [None])[0] or None)
+        device_label = state.gpx_device_label(device_ids)
+        if scope == "current":
+            rows = state.iter_current_gpx_positions(device_ids)
+            filename = gpx_filename(device_label=device_label, current=True)
+            metadata_name = filename[:-4]
+        else:
+            query_from = query.get("from", [None])[0] or None
+            query_to = query.get("to", [None])[0] or None
+            left = parse_query_time(query_from)
+            right = parse_query_time(query_to)
+            if not query_from or not query_to:
+                return json_response(
+                    self,
+                    {"error": "from und to sind erforderlich (ISO-8601)", "error_key": "map.stats.gpx.failed"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            if left is None or right is None:
+                return json_response(
+                    self,
+                    {"error": "from und to müssen ISO-Format haben", "error_key": "map.stats.gpx.failed"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            if left > right:
+                return json_response(
+                    self,
+                    {"error": "from darf nicht nach to liegen", "error_key": "map.stats.gpx.failed"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            rows = state.iter_gpx_positions(device_ids, query_from, query_to)
+            filename = gpx_filename(
+                filename_from=filename_from,
+                filename_to=filename_to,
+                from_iso=query_from,
+                to_iso=query_to,
+                device_label=device_label,
+            )
+            metadata_name = filename[:-4]
+        chunks = iter_gpx_chunks(rows, metadata_name)
+
+        def close_export() -> None:
+            try:
+                chunks.close()
+            finally:
+                closer = getattr(rows, "close", None)
+                if closer is not None:
+                    closer()
+
+        try:
+            try:
+                first = next(chunks)
+            except GpxExportEmpty:
+                return json_response(
+                    self,
+                    {
+                        "error": "Keine GPS-Punkte im ausgewählten Zeitraum.",
+                        "error_key": "map.stats.gpx.empty",
+                    },
+                    HTTPStatus.NOT_FOUND,
+                )
+            except Exception as exc:
+                print(f"[gpx] export failed before response: {exc}")
+                return json_response(
+                    self,
+                    {"error": "Der GPX-Export ist fehlgeschlagen.", "error_key": "map.stats.gpx.failed"},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/gpx+xml; charset=utf-8")
+            self.send_header("Content-Disposition", content_disposition(filename))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            pending = bytearray()
+
+            def push(text: str) -> None:
+                pending.extend(text.encode("utf-8"))
+                if len(pending) >= 65536:
+                    self.wfile.write(pending)
+                    pending.clear()
+                    self.wfile.flush()
+
+            try:
+                push(first)
+                for chunk in chunks:
+                    push(chunk)
+                if pending:
+                    self.wfile.write(pending)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return None
+        finally:
+            close_export()
+        return None
+
     def _sse_positions_stream(self):
         q = _sse_register()
         self.send_response(HTTPStatus.OK)
@@ -758,6 +874,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._sse_positions_stream()
         if route == "/api/themes":
             return json_response(self, {"themes": discover_themes()})
+        if route == "/api/positions/gpx":
+            return self._gpx_download(query)
         if route == "/api/positions":
             query_from = (query.get("from", [None])[0] or None)
             query_to = (query.get("to", [None])[0] or None)
@@ -794,15 +912,90 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": "stride muss 1, 2, 5, 10, 20, 50 oder 100 sein"},
                     HTTPStatus.BAD_REQUEST,
                 )
+            raw_order = query.get("order", [None])[0]
+            if raw_order is None or str(raw_order).strip() == "":
+                order = "ingest"
+            else:
+                order = str(raw_order).strip().lower()
+            if order not in ("ingest", "time"):
+                return json_response(
+                    self,
+                    {"error": "order muss ingest oder time sein"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            raw_total = query.get("include_total", [None])[0]
+            if raw_total is None or str(raw_total).strip() == "":
+                include_total = False
+            else:
+                total_token = str(raw_total).strip().lower()
+                if total_token in ("1", "true", "yes"):
+                    include_total = True
+                elif total_token in ("0", "false", "no"):
+                    include_total = False
+                else:
+                    return json_response(
+                        self,
+                        {"error": "include_total muss 1 oder 0 sein"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+            raw_after_epoch = query.get("after_epoch", [None])[0]
+            raw_after_seq = query.get("after_seq", [None])[0]
+            has_after_epoch = raw_after_epoch is not None and str(raw_after_epoch).strip() != ""
+            has_after_seq = raw_after_seq is not None and str(raw_after_seq).strip() != ""
+            if has_after_epoch != has_after_seq:
+                return json_response(
+                    self,
+                    {"error": "after_epoch und after_seq müssen gemeinsam gesetzt sein"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+            after_epoch = None
+            after_seq = None
+            if has_after_epoch:
+                if order != "time":
+                    return json_response(
+                        self,
+                        {"error": "after_epoch ist nur zusammen mit order=time erlaubt"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                if offset > 0:
+                    return json_response(
+                        self,
+                        {"error": "offset ist zusammen mit after_epoch nicht erlaubt"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                try:
+                    after_epoch = float(str(raw_after_epoch).strip())
+                    after_seq = int(str(raw_after_seq).strip())
+                except (TypeError, ValueError):
+                    return json_response(
+                        self,
+                        {"error": "after_epoch und after_seq müssen numerisch sein"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                if after_epoch != after_epoch or after_epoch in (float("inf"), float("-inf")):
+                    return json_response(
+                        self,
+                        {"error": "after_epoch muss eine endliche Zahl sein"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
             device_names = parse_device_filters(query)
-            rows, has_more = state.query_positions(
-                device_names=device_names,
-                ts_from=query_from,
-                ts_to=query_to,
-                limit=limit,
-                offset=offset,
-                stride=stride,
-            )
+            device_ids = parse_id_list(query, "device_id") if "device_id" in query else None
+            try:
+                page = state.query_position_page(
+                    device_names=device_names,
+                    ts_from=query_from,
+                    ts_to=query_to,
+                    limit=limit,
+                    offset=offset,
+                    stride=stride,
+                    device_ids=device_ids,
+                    order=order,
+                    after_epoch=after_epoch,
+                    after_seq=after_seq,
+                    include_total=include_total,
+                )
+            except ValueError:
+                return json_response(self, {"error": "Ungültige Abfrageparameter"}, HTTPStatus.BAD_REQUEST)
             filters: dict = {
                 "from": query_from,
                 "to": query_to,
@@ -810,16 +1003,28 @@ class Handler(BaseHTTPRequestHandler):
             }
             if stride is not None:
                 filters["stride"] = stride
+            if device_ids is not None:
+                filters["device_id"] = device_ids
+            if order == "time":
+                filters["order"] = order
+            pagination: dict = {
+                "limit": limit,
+                "offset": 0 if after_epoch is not None else offset,
+                "returned": len(page.rows),
+                "has_more": page.has_more,
+            }
+            if include_total and page.total is not None:
+                pagination["total"] = page.total
+            if order == "time" and page.cursor_epoch is not None and page.cursor_seq is not None:
+                pagination["cursor"] = {
+                    "timestamp_epoch": page.cursor_epoch,
+                    "ingest_seq": page.cursor_seq,
+                }
             return json_response(
                 self,
                 {
-                    "positions": rows,
-                    "pagination": {
-                        "limit": limit,
-                        "offset": offset,
-                        "returned": len(rows),
-                        "has_more": has_more,
-                    },
+                    "positions": page.rows,
+                    "pagination": pagination,
                     "filters": filters,
                 },
             )

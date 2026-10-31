@@ -790,8 +790,59 @@ def build_openapi_spec() -> dict:
                                 "Ohne diesen Parameter oder mit 1 bleibt die volle Auflösung (bisheriges Verhalten). "
                                 "Bei einem Wert größer als 1 werden je Gerät nur jeder n-te Punkt sowie immer "
                                 "der zeitlich erste und letzte Punkt des Filters geliefert. "
-                                "limit und offset gelten dann für diese reduzierte Folge. "
-                                "Gespeicherte Positionen, Weiterleitungen und Aufrufe ohne stride bleiben unverändert."
+                                "limit, offset und der Zeit-Cursor gelten dann für diese reduzierte Folge, "
+                                "nicht je Seite neu. "
+                                "Gespeicherte Positionen, Weiterleitungen, der GPX-Export und Aufrufe ohne stride "
+                                "bleiben unverändert."
+                            ),
+                        },
+                        {
+                            "name": "device_id",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string"},
+                            "description": (
+                                "Optionaler Filter nach Geräte-ID, nur für die Kartenabfrage. "
+                                "Mehrfach möglich oder als CSV. Ohne diesen Parameter bleiben alle Geräte enthalten. "
+                                "Der GPX-Export nutzt einen eigenen Endpunkt und liefert weiterhin alle Punkte."
+                            ),
+                        },
+                        {
+                            "name": "order",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "enum": ["ingest", "time"], "default": "ingest"},
+                            "description": (
+                                "Sortierung der Seite. Ohne Parameter oder mit `ingest` bleibt die bisherige "
+                                "Reihenfolge nach ingest_seq. `time` sortiert aufsteigend nach Zeitstempel "
+                                "und bei gleichem Zeitstempel nach ingest_seq."
+                            ),
+                        },
+                        {
+                            "name": "after_epoch",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string"},
+                            "description": (
+                                "Exklusiver Cursor für `order=time`: timestamp_epoch des letzten Punktes der "
+                                "vorherigen Seite, als Dezimalstring. Nur gemeinsam mit after_seq."
+                            ),
+                        },
+                        {
+                            "name": "after_seq",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer"},
+                            "description": "Exklusiver Cursor für `order=time`: ingest_seq des letzten Punktes. Nur gemeinsam mit after_epoch.",
+                        },
+                        {
+                            "name": "include_total",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "boolean", "default": False},
+                            "description": (
+                                "Wenn true, enthält pagination.total die Anzahl der Punkte nach demselben Filter "
+                                "und derselben Ausdünnung. Die Punkte selbst werden dafür nicht übertragen."
                             ),
                         },
                     ],
@@ -805,6 +856,69 @@ def build_openapi_spec() -> dict:
                             },
                         },
                         "400": {"$ref": "#/components/responses/BadRequestJson"},
+                    },
+                }
+            },
+            "/api/positions/gpx": {
+                "get": {
+                    "tags": ["Daten"],
+                    "summary": "GPS-Punkte des Zeitraums als GPX 1.1 herunterladen",
+                    "description": (
+                        "Exportiert alle gespeicherten Punkte der angegebenen Geräte. "
+                        "Die Punktdichte der Karte wird nicht angewendet. "
+                        "Antwort ist ein Dateistream (`application/gpx+xml`), keine gespeicherte Exportdatei."
+                    ),
+                    "operationId": "downloadPositionsGpx",
+                    "parameters": [
+                        {
+                            "name": "device_id",
+                            "in": "query",
+                            "required": True,
+                            "schema": {"type": "string"},
+                            "description": "Geräte-ID. Mehrfach möglich (`?device_id=a&device_id=b`) oder als CSV.",
+                        },
+                        {
+                            "name": "from",
+                            "in": "query",
+                            "schema": {"type": "string", "format": "date-time"},
+                            "description": "Untergrenze (ISO-8601). Nicht nötig bei scope=current.",
+                        },
+                        {
+                            "name": "to",
+                            "in": "query",
+                            "schema": {"type": "string", "format": "date-time"},
+                            "description": "Obergrenze (ISO-8601). Nicht nötig bei scope=current.",
+                        },
+                        {
+                            "name": "scope",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["current"]},
+                            "description": "Bei `current` wird je Gerät nur die aktuelle Position exportiert.",
+                        },
+                        {
+                            "name": "filename_from",
+                            "in": "query",
+                            "schema": {"type": "string", "format": "date"},
+                            "description": "Optionales Datum YYYY-MM-DD nur für den Dateinamen.",
+                        },
+                        {
+                            "name": "filename_to",
+                            "in": "query",
+                            "schema": {"type": "string", "format": "date"},
+                            "description": "Optionales Datum YYYY-MM-DD nur für den Dateinamen.",
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "GPX-1.1-Datei",
+                            "content": {
+                                "application/gpx+xml": {
+                                    "schema": {"type": "string", "format": "binary"}
+                                }
+                            },
+                        },
+                        "400": {"$ref": "#/components/responses/BadRequestJson"},
+                        "404": {"$ref": "#/components/responses/BadRequestJson"},
                     },
                 }
             },
@@ -1019,6 +1133,18 @@ def build_openapi_spec() -> dict:
                                 "offset": {"type": "integer"},
                                 "returned": {"type": "integer"},
                                 "has_more": {"type": "boolean"},
+                                "total": {
+                                    "type": "integer",
+                                    "description": "Nur gesetzt, wenn include_total=1. Anzahl nach Filter und stride.",
+                                },
+                                "cursor": {
+                                    "type": "object",
+                                    "description": "Nur bei order=time, wenn die Seite mindestens einen Punkt enthält.",
+                                    "properties": {
+                                        "timestamp_epoch": {"type": "string"},
+                                        "ingest_seq": {"type": "integer"},
+                                    },
+                                },
                             },
                             "required": ["limit", "offset", "returned", "has_more"],
                         },
@@ -1032,6 +1158,16 @@ def build_openapi_spec() -> dict:
                                     "type": "integer",
                                     "enum": [2, 5, 10, 20, 50, 100],
                                     "description": "Nur gesetzt, wenn eine Ausdünnung mit stride > 1 angefordert wurde.",
+                                },
+                                "device_id": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Nur gesetzt, wenn device_id übergeben wurde.",
+                                },
+                                "order": {
+                                    "type": "string",
+                                    "enum": ["time"],
+                                    "description": "Nur gesetzt, wenn order=time angefordert wurde.",
                                 },
                             },
                             "required": ["from", "to", "device"],

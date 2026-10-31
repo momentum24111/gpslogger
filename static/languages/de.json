@@ -65,7 +65,18 @@
       "positionMany": "{count} Positionen",
       "meters": "{distance} m",
       "kilometers": "{distance} km",
-      "aria": "{positions}, {distance}"
+      "aria": "{positions}, {distance}",
+      "loadingProgress": "Positionen: {loaded} / {total} · {percent} %",
+      "loadingAria": "Route wird geladen, {loaded} von {total}, {percent} Prozent",
+      "loadingSpinner": "Route wird geladen …",
+      "loadingSpinnerAria": "Route wird geladen",
+      "gpx": {
+        "download": "GPX herunterladen",
+        "preparing": "GPX wird erstellt …",
+        "empty": "Keine GPS-Punkte im ausgewählten Zeitraum.",
+        "failed": "Der GPX-Export ist fehlgeschlagen.",
+        "noDevices": "Keine Geräte ausgewählt."
+      }
     }
   },
   "time": {

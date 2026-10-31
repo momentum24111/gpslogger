@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -40,6 +41,11 @@ def timestamp_to_epoch(value: Any) -> float | None:
     if dt is None:
         return None
     return dt.timestamp()
+
+
+def format_cursor_epoch(value: float) -> str:
+    """Dezimaldarstellung, die über Float-JSON und Query-Strings stabil bleibt."""
+    return format(float(value), ".17g")
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -341,43 +347,51 @@ def thin_positions_by_stride(rows: list[dict[str, Any]], stride: int) -> list[di
     return [row for index, row in enumerate(rows) if index in keep]
 
 
-def query_positions(
-    conn: sqlite3.Connection,
+@dataclass(frozen=True)
+class PositionPage:
+    rows: list[dict[str, Any]]
+    has_more: bool
+    total: int | None = None
+    cursor_epoch: str | None = None
+    cursor_seq: int | None = None
+
+
+def _normalize_device_names(device_names: list[str] | None) -> set[str] | None:
+    if not isinstance(device_names, list) or len(device_names) == 0:
+        return None
+    normalized = {str(name).strip().lower() for name in device_names if str(name).strip()}
+    return normalized or None
+
+
+def _normalize_device_ids(device_ids: list[str] | None) -> list[str] | None:
+    if device_ids is None:
+        return None
+    return list(dict.fromkeys(str(device_id).strip() for device_id in device_ids if str(device_id).strip()))
+
+
+def _position_where_sql(
     device_names: list[str] | None,
+    device_ids: list[str] | None,
     ts_from: str | None,
     ts_to: str | None,
-    *,
-    limit: int = 500,
-    offset: int = 0,
-    stride: int | None = None,
-) -> tuple[list[dict[str, Any]], bool]:
-    left = timestamp_to_epoch(ts_from)
-    right = timestamp_to_epoch(ts_to)
-    safe_limit = max(1, min(5000, int(limit)))
-    safe_offset = max(0, int(offset))
-    safe_stride = 1
-    if stride is not None:
-        try:
-            safe_stride = int(stride)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("stride") from exc
-        if safe_stride not in MAP_POINT_STRIDES:
-            raise ValueError("stride")
-
+) -> tuple[str, list[Any]]:
     where: list[str] = []
     params: list[Any] = []
-
-    normalized_device_names: set[str] | None = None
-    if isinstance(device_names, list) and len(device_names) > 0:
-        normalized_device_names = {str(name).strip().lower() for name in device_names if str(name).strip()}
-        if not normalized_device_names:
-            normalized_device_names = None
-
+    normalized_device_names = _normalize_device_names(device_names)
     if normalized_device_names is not None:
         placeholders = ",".join("?" for _ in normalized_device_names)
         where.append(f"device_name_lower IN ({placeholders})")
         params.extend(sorted(normalized_device_names))
-
+    normalized_device_ids = _normalize_device_ids(device_ids)
+    if normalized_device_ids is not None:
+        if not normalized_device_ids:
+            where.append("0")
+        else:
+            placeholders = ",".join("?" for _ in normalized_device_ids)
+            where.append(f"device_id IN ({placeholders})")
+            params.extend(normalized_device_ids)
+    left = timestamp_to_epoch(ts_from)
+    right = timestamp_to_epoch(ts_to)
     if left is not None or right is not None:
         where.append("timestamp_epoch IS NOT NULL")
         if left is not None:
@@ -386,11 +400,65 @@ def query_positions(
         if right is not None:
             where.append("timestamp_epoch <= ?")
             params.append(right)
-
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-    # limit+1 für effizientes has_more; Dateireihenfolge = ingest_seq.
-    # stride > 1 dünnt in SQL je Gerät aus, damit die Karte nicht alle Rohpunkte erhält.
-    # Zeitlich erster und letzter Punkt je Gerät bleiben erhalten. Ohne stride bleibt die Abfrage unverändert.
+    return where_sql, params
+
+
+def _stride_value(stride: int | None) -> int:
+    safe_stride = 1
+    if stride is None:
+        return safe_stride
+    try:
+        safe_stride = int(stride)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("stride") from exc
+    if safe_stride not in MAP_POINT_STRIDES:
+        raise ValueError("stride")
+    return safe_stride
+
+
+def query_position_page(
+    conn: sqlite3.Connection,
+    device_names: list[str] | None,
+    ts_from: str | None,
+    ts_to: str | None,
+    *,
+    limit: int = 500,
+    offset: int = 0,
+    stride: int | None = None,
+    device_ids: list[str] | None = None,
+    order: str = "ingest",
+    after_epoch: float | None = None,
+    after_seq: int | None = None,
+    include_total: bool = False,
+) -> PositionPage:
+    """Seiten der Karten- oder API-Abfrage.
+
+    `order=ingest` bleibt die bisherige Reihenfolge. `order=time` sortiert stabil
+    nach Zeit und ingest_seq. Ein Cursor gilt nur für diese Zeitordnung und zählt
+    die Ausdünnung über den gesamten Zeitraum, nicht je Seite neu.
+    """
+    if order not in ("ingest", "time"):
+        raise ValueError("order")
+    if (after_epoch is None) != (after_seq is None):
+        raise ValueError("cursor")
+    if after_epoch is not None and order != "time":
+        raise ValueError("cursor")
+    safe_limit = max(1, min(5000, int(limit)))
+    safe_offset = 0 if after_epoch is not None else max(0, int(offset))
+    safe_stride = _stride_value(stride)
+    where_sql, params = _position_where_sql(device_names, device_ids, ts_from, ts_to)
+    order_sql = "timestamp_epoch ASC, ingest_seq ASC" if order == "time" else "ingest_seq ASC"
+    cursor_sql = ""
+    cursor_params: list[Any] = []
+    if after_epoch is not None:
+        cursor_sql = " AND (timestamp_epoch > ? OR (timestamp_epoch = ? AND ingest_seq > ?))"
+        cursor_params = [float(after_epoch), float(after_epoch), int(after_seq or 0)]
+
+    total: int | None = None
+    if include_total:
+        total = _count_matching_positions(conn, where_sql, params, safe_stride)
+
     if safe_stride > 1:
         partition = "COALESCE(NULLIF(TRIM(device_id), ''), IFNULL(device_name_lower, ''))"
         sql = (
@@ -408,23 +476,159 @@ def query_positions(
             ") "
             "SELECT * FROM filtered"
             " WHERE (((_sample_rn - 1) % ? = 0) OR _sample_rn = _sample_count)"
-            " ORDER BY ingest_seq ASC"
+            f"{cursor_sql}"
+            f" ORDER BY {order_sql}"
             " LIMIT ? OFFSET ?"
         )
-        params.extend([safe_stride, safe_limit + 1, safe_offset])
+        query_params = [*params, safe_stride, *cursor_params, safe_limit + 1, safe_offset]
     else:
+        cursor_clause = ""
+        if cursor_sql:
+            cursor_clause = cursor_sql if where_sql else " WHERE " + cursor_sql.removeprefix(" AND ")
         sql = (
             "SELECT * FROM positions"
-            f"{where_sql}"
-            " ORDER BY ingest_seq ASC"
+            f"{where_sql}{cursor_clause}"
+            f" ORDER BY {order_sql}"
             " LIMIT ? OFFSET ?"
         )
-        params.extend([safe_limit + 1, safe_offset])
-    rows = conn.execute(sql, params).fetchall()
-    has_more = len(rows) > safe_limit
+        query_params = [*params, *cursor_params, safe_limit + 1, safe_offset]
+
+    raw_rows = conn.execute(sql, query_params).fetchall()
+    has_more = len(raw_rows) > safe_limit
     if has_more:
-        rows = rows[:safe_limit]
-    return [db_row_to_position(r) for r in rows], has_more
+        raw_rows = raw_rows[:safe_limit]
+    cursor_epoch: str | None = None
+    cursor_seq: int | None = None
+    if order == "time" and raw_rows:
+        last = raw_rows[-1]
+        epoch = last["timestamp_epoch"]
+        seq = last["ingest_seq"]
+        if epoch is not None and seq is not None:
+            cursor_epoch = format_cursor_epoch(float(epoch))
+            cursor_seq = int(seq)
+    return PositionPage(
+        rows=[db_row_to_position(row) for row in raw_rows],
+        has_more=has_more,
+        total=total,
+        cursor_epoch=cursor_epoch,
+        cursor_seq=cursor_seq,
+    )
+
+
+def _count_matching_positions(
+    conn: sqlite3.Connection,
+    where_sql: str,
+    params: list[Any],
+    stride: int,
+) -> int:
+    if stride > 1:
+        partition = "COALESCE(NULLIF(TRIM(device_id), ''), IFNULL(device_name_lower, ''))"
+        sql = (
+            "WITH filtered AS ("
+            " SELECT"
+            " ROW_NUMBER() OVER ("
+            f" PARTITION BY {partition}"
+            " ORDER BY timestamp_epoch ASC, ingest_seq ASC"
+            " ) AS _sample_rn,"
+            " COUNT(*) OVER ("
+            f" PARTITION BY {partition}"
+            " ) AS _sample_count"
+            " FROM positions"
+            f"{where_sql}"
+            ") "
+            "SELECT COUNT(*) AS c FROM filtered"
+            " WHERE (((_sample_rn - 1) % ? = 0) OR _sample_rn = _sample_count)"
+        )
+        row = conn.execute(sql, [*params, stride]).fetchone()
+    else:
+        sql = f"SELECT COUNT(*) AS c FROM positions{where_sql}"
+        row = conn.execute(sql, params).fetchone()
+    return int(row["c"] if row else 0)
+
+
+def query_positions(
+    conn: sqlite3.Connection,
+    device_names: list[str] | None,
+    ts_from: str | None,
+    ts_to: str | None,
+    *,
+    limit: int = 500,
+    offset: int = 0,
+    stride: int | None = None,
+    device_ids: list[str] | None = None,
+    order: str = "ingest",
+    after_epoch: float | None = None,
+    after_seq: int | None = None,
+    include_total: bool = False,
+) -> tuple[list[dict[str, Any]], bool]:
+    page = query_position_page(
+        conn,
+        device_names,
+        ts_from,
+        ts_to,
+        limit=limit,
+        offset=offset,
+        stride=stride,
+        device_ids=device_ids,
+        order=order,
+        after_epoch=after_epoch,
+        after_seq=after_seq,
+        include_total=include_total,
+    )
+    return page.rows, page.has_more
+
+
+def iter_full_positions(
+    conn: sqlite3.Connection,
+    device_ids: list[str] | None,
+    ts_from: str | None,
+    ts_to: str | None,
+) -> Iterable[dict[str, Any]]:
+    """Alle gespeicherten Punkte ohne Punktdichte, je Gerät chronologisch.
+
+    Der Cursor wird zeilenweise gelesen, damit große Zeiträume nicht komplett
+    im Speicher liegen müssen.
+    """
+    where = [
+        "latitude >= -90 AND latitude <= 90",
+        "longitude >= -180 AND longitude <= 180",
+    ]
+    params: list[Any] = []
+    ids = [str(device_id).strip() for device_id in (device_ids or []) if str(device_id).strip()]
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    where.append(f"device_id IN ({placeholders})")
+    params.extend(ids)
+
+    left = timestamp_to_epoch(ts_from)
+    right = timestamp_to_epoch(ts_to)
+    if left is not None or right is not None:
+        where.append("timestamp_epoch IS NOT NULL")
+        if left is not None:
+            where.append("timestamp_epoch >= ?")
+            params.append(left)
+        if right is not None:
+            where.append("timestamp_epoch <= ?")
+            params.append(right)
+
+    sql = (
+        "SELECT device_id, device_name, latitude, longitude, altitude, timestamp, received_at "
+        "FROM positions WHERE "
+        + " AND ".join(where)
+        + " ORDER BY COALESCE(NULLIF(TRIM(device_id), ''), IFNULL(device_name_lower, '')), "
+        "timestamp_epoch ASC, ingest_seq ASC"
+    )
+    cursor = conn.execute(sql, params)
+    for row in cursor:
+        yield {
+            "device_id": row["device_id"],
+            "device_name": row["device_name"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "altitude": row["altitude"],
+            "timestamp": row["timestamp"] or row["received_at"],
+        }
 
 
 def count_positions(conn: sqlite3.Connection) -> int:

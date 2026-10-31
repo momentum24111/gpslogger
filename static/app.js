@@ -305,6 +305,9 @@ const ui = {
   mapRouteStatsEl: null,
   mapRouteStatsCount: 0,
   mapRouteStatsDistanceMeters: 0,
+  gpxExporting: false,
+  mapRouteLoading: null,
+  mapRangeLoadActive: false,
   layers: {},
   markers: new Map(),
   liveLabelMarkers: [],
@@ -502,7 +505,7 @@ async function bootstrap() {
 
 async function runAutoRefreshCycle() {
   try {
-    await refreshMapData({ preserveView: true });
+    await refreshMapData({ preserveView: true, background: true });
     if (ui.settingsModalOpen) {
       await loadSettings();
       await loadDevices();
@@ -841,7 +844,7 @@ function connectPositionStream() {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type === "position") {
-        refreshMapData({ preserveView: true });
+        refreshMapData({ preserveView: true, background: true });
         scheduleStorageOverviewRefresh();
       }
     } catch (_e) {
@@ -1074,13 +1077,90 @@ function renderMapRouteStats() {
   if (positionsEl) positionsEl.textContent = positionsLabel;
   if (distanceEl) distanceEl.textContent = distanceLabel;
   const summary = `${positionsLabel} · ${distanceLabel}`;
-  el.title = summary;
-  el.setAttribute("aria-label", t("map.stats.aria", { positions: positionsLabel, distance: distanceLabel }));
+  const summaryEl = el.querySelector(".map-route-stats-summary");
+  if (summaryEl) summaryEl.title = summary;
+  const loading = ui.mapRouteLoading;
+  el.classList.toggle("leaflet-route-stats--loading", !!loading);
+  const loadingEl = el.querySelector(".map-route-stats-loading");
+  if (loadingEl) {
+    loadingEl.hidden = !loading;
+    const labelEl = loadingEl.querySelector("[data-route-stats='loading-label']");
+    const trackEl = loadingEl.querySelector(".map-route-stats-loading-track");
+    const barEl = loadingEl.querySelector("[data-route-stats='loading-bar']");
+    const spinnerRow = loadingEl.querySelector("[data-route-stats='loading-spinner']");
+    const spinnerText = loadingEl.querySelector(".map-route-stats-loading-spinner-text");
+    if (loading?.mode === "determinate" && Number(loading.total) > 0) {
+      const loaded = Math.max(0, Math.round(Number(loading.loaded) || 0));
+      const total = Math.max(0, Math.round(Number(loading.total) || 0));
+      const percent = loading.done && loaded >= total ? 100 : Math.min(99, Math.floor((loaded / total) * 100));
+      if (labelEl) {
+        labelEl.hidden = false;
+        labelEl.textContent = t("map.stats.loadingProgress", {
+          loaded: ROUTE_STATS_COUNT_FORMAT.format(loaded),
+          total: ROUTE_STATS_COUNT_FORMAT.format(total),
+          percent,
+        });
+      }
+      if (trackEl) trackEl.hidden = false;
+      if (barEl) barEl.style.width = `${percent}%`;
+      if (spinnerRow) spinnerRow.hidden = true;
+      loadingEl.setAttribute("role", "progressbar");
+      loadingEl.setAttribute("aria-valuemin", "0");
+      loadingEl.setAttribute("aria-valuemax", "100");
+      loadingEl.setAttribute("aria-valuenow", String(percent));
+      loadingEl.setAttribute(
+        "aria-label",
+        t("map.stats.loadingAria", {
+          loaded: ROUTE_STATS_COUNT_FORMAT.format(loaded),
+          total: ROUTE_STATS_COUNT_FORMAT.format(total),
+          percent,
+        }),
+      );
+    } else if (loading) {
+      if (labelEl) labelEl.hidden = true;
+      if (trackEl) trackEl.hidden = true;
+      if (spinnerRow) spinnerRow.hidden = false;
+      if (spinnerText) spinnerText.textContent = t("map.stats.loadingSpinner");
+      loadingEl.setAttribute("role", "status");
+      loadingEl.removeAttribute("aria-valuenow");
+      loadingEl.removeAttribute("aria-valuemin");
+      loadingEl.removeAttribute("aria-valuemax");
+      loadingEl.setAttribute("aria-label", t("map.stats.loadingSpinnerAria"));
+    }
+  }
+  el.setAttribute(
+    "aria-label",
+    loading?.mode === "determinate"
+      ? loadingEl?.getAttribute("aria-label") || t("map.stats.aria", { positions: positionsLabel, distance: distanceLabel })
+      : loading
+        ? t("map.stats.loadingSpinnerAria")
+        : t("map.stats.aria", { positions: positionsLabel, distance: distanceLabel }),
+  );
+  const button = el.querySelector(".map-route-stats-download");
+  if (!button) return;
+  const loading = button.dataset.loading === "true" || ui.gpxExporting;
+  const label = button.querySelector(".map-route-stats-download-label");
+  const text = loading ? t("map.stats.gpx.preparing") : t("map.stats.gpx.download");
+  if (label) label.textContent = text;
+  button.title = loading || ui.mapRouteStatsCount > 0 ? text : t("map.stats.gpx.empty");
+  button.setAttribute("aria-label", text);
+  button.disabled = loading || ui.mapRouteStatsCount <= 0;
 }
 
 function setMapRouteStats({ count = 0, distanceMeters = 0 } = {}) {
   ui.mapRouteStatsCount = Number.isFinite(Number(count)) ? Math.max(0, Math.round(Number(count))) : 0;
   ui.mapRouteStatsDistanceMeters = Number.isFinite(distanceMeters) && distanceMeters > 0 ? distanceMeters : 0;
+  renderMapRouteStats();
+}
+
+function setMapRouteLoading(next) {
+  ui.mapRouteLoading = next;
+  renderMapRouteStats();
+}
+
+function clearMapRouteLoading() {
+  if (!ui.mapRouteLoading) return;
+  ui.mapRouteLoading = null;
   renderMapRouteStats();
 }
 
@@ -1095,17 +1175,45 @@ function initMapRouteStatsControl() {
     onAdd() {
       const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-route-stats");
       container.setAttribute("role", "group");
-      const positions = L.DomUtil.create("span", "map-route-stats-positions", container);
+      const summary = L.DomUtil.create("div", "map-route-stats-summary", container);
+      const positions = L.DomUtil.create("span", "map-route-stats-positions", summary);
       positions.dataset.routeStats = "positions";
       positions.setAttribute("aria-hidden", "true");
-      const sep = L.DomUtil.create("span", "map-route-stats-sep", container);
+      const sep = L.DomUtil.create("span", "map-route-stats-sep", summary);
       sep.setAttribute("aria-hidden", "true");
       sep.textContent = "·";
-      const distance = L.DomUtil.create("span", "map-route-stats-distance", container);
+      const distance = L.DomUtil.create("span", "map-route-stats-distance", summary);
       distance.dataset.routeStats = "distance";
       distance.setAttribute("aria-hidden", "true");
+      const loadingWrap = L.DomUtil.create("div", "map-route-stats-loading", container);
+      loadingWrap.hidden = true;
+      const loadingLabel = L.DomUtil.create("div", "map-route-stats-loading-label", loadingWrap);
+      loadingLabel.dataset.routeStats = "loading-label";
+      const track = L.DomUtil.create("div", "map-route-stats-loading-track", loadingWrap);
+      const bar = L.DomUtil.create("div", "map-route-stats-loading-bar", track);
+      bar.dataset.routeStats = "loading-bar";
+      const spinnerRow = L.DomUtil.create("div", "map-route-stats-loading-spinner-row", loadingWrap);
+      spinnerRow.dataset.routeStats = "loading-spinner";
+      spinnerRow.hidden = true;
+      const spinner = L.DomUtil.create("span", "map-route-stats-spinner", spinnerRow);
+      spinner.setAttribute("aria-hidden", "true");
+      L.DomUtil.create("span", "map-route-stats-loading-spinner-text", spinnerRow);
+      const button = L.DomUtil.create("button", "map-route-stats-download", container);
+      button.type = "button";
+      button.dataset.loading = "false";
+      const icon = L.DomUtil.create("span", "material-symbols-outlined", button);
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = "download";
+      const spinner = L.DomUtil.create("span", "map-route-stats-spinner", button);
+      spinner.hidden = true;
+      spinner.setAttribute("aria-hidden", "true");
+      L.DomUtil.create("span", "map-route-stats-download-label", button);
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
+      L.DomEvent.on(button, "click", (event) => {
+        L.DomEvent.stop(event);
+        downloadGpxExport();
+      });
       return container;
     },
   });
@@ -1113,6 +1221,109 @@ function initMapRouteStatsControl() {
   ui.map.addControl(ui.mapRouteStatsControl);
   ui.mapRouteStatsEl = ui.mapRouteStatsControl.getContainer();
   renderMapRouteStats();
+}
+
+function localDateStamp(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function filenameFromContentDisposition(header) {
+  if (!header) return "";
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1].trim());
+    } catch {
+      return encoded[1].trim();
+    }
+  }
+  const plain = /filename="([^"]+)"/i.exec(header);
+  return plain ? plain[1] : "";
+}
+
+function buildGpxExportRequest() {
+  const deviceIds = [...state.visibleDeviceIds].filter(Boolean);
+  if (!deviceIds.length) return { errorKey: "map.stats.gpx.noDevices" };
+  const params = new URLSearchParams();
+  deviceIds.forEach((id) => params.append("device_id", id));
+  if (ui.mapRange === MAP_RANGE_CURRENT) {
+    params.set("scope", "current");
+    return { params };
+  }
+  const fromInput = document.getElementById("map-from");
+  const toInput = document.getElementById("map-to");
+  const resolved = resolveRangeQuery(ui.mapRange, fromInput?.value || "", toInput?.value || "");
+  if (resolved.error) return { error: resolved.error };
+  params.set("from", resolved.from);
+  params.set("to", resolved.to);
+  if (ui.mapRange === "custom") {
+    if (fromInput?.value) params.set("filename_from", fromInput.value);
+    if (toInput?.value) params.set("filename_to", toInput.value);
+  } else {
+    const fromDate = new Date(resolved.from);
+    const toDate = new Date(resolved.to);
+    if (!Number.isNaN(fromDate.getTime())) params.set("filename_from", localDateStamp(fromDate));
+    if (!Number.isNaN(toDate.getTime())) params.set("filename_to", localDateStamp(toDate));
+  }
+  return { params };
+}
+
+function setGpxDownloadLoading(loading) {
+  ui.gpxExporting = loading;
+  const button = ui.mapRouteStatsEl?.querySelector(".map-route-stats-download");
+  if (!button) return;
+  button.dataset.loading = loading ? "true" : "false";
+  button.setAttribute("aria-busy", loading ? "true" : "false");
+  const icon = button.querySelector(".material-symbols-outlined");
+  const spinner = button.querySelector(".map-route-stats-spinner");
+  if (icon) icon.hidden = loading;
+  if (spinner) spinner.hidden = !loading;
+  renderMapRouteStats();
+}
+
+async function downloadGpxExport() {
+  if (ui.gpxExporting) return;
+  const request = buildGpxExportRequest();
+  if (request.errorKey) {
+    pushToast(ui.toastArea, t(request.errorKey), "error");
+    return;
+  }
+  if (request.error) {
+    pushToast(ui.toastArea, request.error, "error");
+    return;
+  }
+  setGpxDownloadLoading(true);
+  try {
+    const response = await fetch(`/api/positions/gpx?${request.params.toString()}`);
+    if (!response.ok) {
+      let message = t("map.stats.gpx.failed");
+      try {
+        const data = await response.json();
+        if (data?.error_key) message = t(data.error_key, data.error_vars || {});
+        else if (data?.error) message = String(data.error);
+      } catch {
+        message = t("map.stats.gpx.failed");
+      }
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition")) || "GPSLogger.gpx";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    pushToast(ui.toastArea, err?.message || t("map.stats.gpx.failed"), "error");
+  } finally {
+    setGpxDownloadLoading(false);
+  }
 }
 
 function toggleMapSidebarDrawer() {
@@ -1676,8 +1887,11 @@ function beginMapLoad() {
 }
 
 async function refreshMapData(opts = {}) {
+  if (opts.background && ui.mapRangeLoadActive) return;
   const load = beginMapLoad();
   if (ui.mapRange === MAP_RANGE_CURRENT) {
+    ui.mapRangeLoadActive = false;
+    clearMapRouteLoading();
     if (opts.reloadBtn) {
       setButtonLoading(opts.reloadBtn, true, "Lädt...");
     }
@@ -1714,6 +1928,13 @@ async function refreshMapData(opts = {}) {
   setFieldState(toField, "default", "");
   if (error) {
     if (!load.isCurrent()) return;
+    const wasLoading = ui.mapRangeLoadActive;
+    ui.mapRangeLoadActive = false;
+    clearMapRouteLoading();
+    if (wasLoading) {
+      clearMapOverlays();
+      setMapRouteStats({ count: 0, distanceMeters: 0 });
+    }
     setFieldState(fromField, "error", error);
     setFieldState(toField, "error", error);
     return;
@@ -1722,32 +1943,111 @@ async function refreshMapData(opts = {}) {
   if (opts.reloadBtn) {
     setButtonLoading(opts.reloadBtn, true, "Lädt...");
   }
+  const deviceIds = [...state.visibleDeviceIds].filter(Boolean);
+  if (!deviceIds.length) {
+    ui.mapRangeLoadActive = false;
+    clearMapRouteLoading();
+    clearMapOverlays();
+    setMapRouteStats({ count: 0, distanceMeters: 0 });
+    if (load.isCurrent() && opts.reloadBtn) setButtonLoading(opts.reloadBtn, false);
+    return;
+  }
   const query = new URLSearchParams();
   if (from) query.set("from", from);
   if (to) query.set("to", to);
+  deviceIds.forEach((id) => query.append("device_id", id));
+  ui.mapRangeLoadActive = true;
+  const session = createRouteDrawSession({ preserveView: !!opts.preserveView });
+  let mapReset = false;
+  const resetMapForLoad = () => {
+    if (mapReset || !load.isCurrent()) return;
+    mapReset = true;
+    clearMapOverlays();
+    setMapRouteStats({ count: 0, distanceMeters: 0 });
+  };
+  const startedAt = performance.now();
+  let revealed = false;
+  let settled = false;
+  let processed = 0;
+  let total = null;
+  let hasMore = false;
+  const publishProgress = (done) => {
+    if (!load.isCurrent()) return;
+    setMapRouteStats({ count: session.count, distanceMeters: session.distanceMeters });
+    const elapsed = performance.now() - startedAt;
+    const longEnough = elapsed >= 200 || hasMore || (Number(total) > ROUTE_RENDER_CHUNK);
+    if (!revealed && (done || !longEnough)) return;
+    revealed = true;
+    if (!mapReset) resetMapForLoad();
+    if (total == null || !(Number(total) > 0)) {
+      if (!done) setMapRouteLoading({ mode: "indeterminate" });
+      return;
+    }
+    const loaded = Math.max(0, processed);
+    setMapRouteLoading({
+      mode: "determinate",
+      loaded,
+      total,
+      done: !!done && loaded >= total,
+    });
+  };
+  const revealTimer = setTimeout(() => {
+    if (settled || !load.isCurrent()) return;
+    publishProgress(false);
+  }, 200);
   try {
-    const positionsPromise = loadAllPositionsForRange(query, load);
     const statusesPromise = loadDeviceStatuses(load.signal).catch((err) => {
       if (isAbortError(err) || !load.isCurrent()) throw err;
     });
-    const positions = await positionsPromise;
+    const completed = await loadRouteIncrementally(query, load, session, {
+      onPage(meta) {
+        hasMore = meta.hasMore;
+        if (meta.total != null) total = meta.total;
+      },
+      onChunk(accepted) {
+        processed += accepted;
+        publishProgress(false);
+      },
+      beforePoints: resetMapForLoad,
+    });
+    if (!load.isCurrent() || !completed) return;
     await statusesPromise;
-    if (!load.isCurrent() || positions == null) return;
+    if (!load.isCurrent()) return;
+    if (session.count === 0) resetMapForLoad();
+    session.finish();
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
-    drawPositions(positions, { preserveView: !!opts.preserveView });
+    publishProgress(true);
+    if (revealed && total != null && processed >= total) {
+      await yieldToMain();
+      await yieldToMain();
+    }
   } catch (err) {
     if (!load.isCurrent() || isAbortError(err)) return;
+    clearMapOverlays();
+    setMapRouteStats({ count: 0, distanceMeters: 0 });
     pushToast(ui.toastArea, err.message, "error");
   } finally {
-    if (load.isCurrent() && opts.reloadBtn) {
-      setButtonLoading(opts.reloadBtn, false);
+    settled = true;
+    clearTimeout(revealTimer);
+    session.dispose();
+    if (load.isCurrent()) {
+      ui.mapRangeLoadActive = false;
+      clearMapRouteLoading();
+      if (opts.reloadBtn) setButtonLoading(opts.reloadBtn, false);
     }
   }
 }
 
 const POSITIONS_PAGE_SIZE = 2000;
 const POSITIONS_MAX_PAGES = 100;
+const ROUTE_RENDER_CHUNK = 400;
+
+function yieldToMain() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
 
 function buildPositionDedupKey(pos) {
   return [
@@ -1759,43 +2059,224 @@ function buildPositionDedupKey(pos) {
   ].join("|");
 }
 
-function normalizeAndSortPositions(positions) {
+function createRouteDrawSession({ preserveView = false } = {}) {
+  const devices = new Map();
   const seen = new Set();
-  const merged = [];
-  positions.forEach((pos) => {
-    const key = buildPositionDedupKey(pos);
-    if (seen.has(key)) return;
+  let count = 0;
+  let distanceMeters = 0;
+  let userMovedMap = false;
+  let listenerAttached = false;
+  let fittedInitial = false;
+
+  const onDragStart = () => {
+    userMovedMap = true;
+  };
+  function ensureDragListener() {
+    if (listenerAttached || preserveView || !ui.map) return;
+    ui.map.on("dragstart", onDragStart);
+    listenerAttached = true;
+  }
+
+  function dispose() {
+    if (listenerAttached && ui.map) ui.map.off("dragstart", onDragStart);
+    listenerAttached = false;
+  }
+
+  function ensureDevice(deviceId) {
+    let device = devices.get(deviceId);
+    if (device) return device;
+    const stroke = resolvePaletteColor(getDeviceColorIndex(deviceId));
+    const line = L.polyline([], {
+      color: stroke,
+      weight: getMapCssNumber("--map-route-line-width", 3),
+      opacity: getMapCssNumber("--map-route-line-opacity", 0.9),
+    }).addTo(ui.map);
+    ui.routeLines.push(line);
+    device = {
+      stroke,
+      line,
+      segments: [[]],
+      lastPoint: null,
+      lastMarker: null,
+      prevLat: 0,
+      prevLng: 0,
+      hasPrev: false,
+    };
+    devices.set(deviceId, device);
+    return device;
+  }
+
+  function routePointStyle() {
+    return {
+      radius: getMapCssNumber("--map-route-point-radius", 3),
+      fillColor: getMapCssVar("--map-route-point-fill"),
+      color: getMapCssVar("--map-route-point-stroke"),
+      weight: getMapCssNumber("--map-route-point-stroke-width", 1),
+      fillOpacity: getMapCssNumber("--map-route-point-fill-opacity", 1),
+      opacity: getMapCssNumber("--map-route-point-stroke-opacity", 1),
+      className: "map-route-point",
+    };
+  }
+
+  function acceptPoint(point, style) {
+    if (!point?.device_id || !state.visibleDeviceIds.has(point.device_id)) return false;
+    const key = buildPositionDedupKey(point);
+    if (seen.has(key)) return false;
     seen.add(key);
-    merged.push(pos);
-  });
-  merged.sort((a, b) => {
-    const tA = Date.parse(String(a?.timestamp ?? ""));
-    const tB = Date.parse(String(b?.timestamp ?? ""));
-    if (Number.isFinite(tA) && Number.isFinite(tB) && tA !== tB) return tA - tB;
-    return String(a?.timestamp ?? "").localeCompare(String(b?.timestamp ?? ""));
-  });
-  return merged;
+    const device = ensureDevice(point.device_id);
+    const lat = Number(point.latitude);
+    const lng = Number(point.longitude);
+    const segment = device.segments[device.segments.length - 1];
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      if (device.hasPrev) distanceMeters += haversineDistanceMeters(device.prevLat, device.prevLng, lat, lng);
+      device.prevLat = lat;
+      device.prevLng = lng;
+      device.hasPrev = true;
+      segment.push(L.latLng(lat, lng));
+    } else {
+      device.hasPrev = false;
+      if (segment.length) device.segments.push([]);
+      device.lastPoint = point;
+      count += 1;
+      return device;
+    }
+    const marker = L.circleMarker([lat, lng], style).addTo(ui.map);
+    marker.bindTooltip(buildPositionTooltipHtml(point), {
+      sticky: true,
+      className: "map-point-tooltip",
+    });
+    bindRoutePointInteractions(marker);
+    ui.routePointMarkers.push(marker);
+    device.lastMarker = marker;
+    device.lastPoint = point;
+    count += 1;
+    return device;
+  }
+
+  function fitIfNeeded() {
+    if (preserveView || userMovedMap || !ui.map) return;
+    const points = [];
+    devices.forEach((device) => {
+      device.segments.forEach((segment) => segment.forEach((latLng) => points.push(latLng)));
+    });
+    if (!points.length) return;
+    const bounds = L.latLngBounds(points);
+    if (!bounds.isValid()) return;
+    ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18, animate: false });
+  }
+
+  async function append(positions, { isCurrent, onChunk, beforePoints } = {}) {
+    const style = routePointStyle();
+    const list = Array.isArray(positions) ? positions : [];
+    if (!list.length) return !isCurrent || isCurrent();
+    ensureDragListener();
+    for (let index = 0; index < list.length; index += ROUTE_RENDER_CHUNK) {
+      if (isCurrent && !isCurrent()) return false;
+      if (beforePoints) beforePoints();
+      if (isCurrent && !isCurrent()) return false;
+      const dirty = new Set();
+      let accepted = 0;
+      const end = Math.min(list.length, index + ROUTE_RENDER_CHUNK);
+      for (let i = index; i < end; i += 1) {
+        const device = acceptPoint(list[i], style);
+        if (!device) continue;
+        dirty.add(device);
+        accepted += 1;
+      }
+      dirty.forEach((device) => {
+        const segments = device.segments.filter((segment) => segment.length);
+        device.line.setLatLngs(segments.length === 1 ? segments[0] : segments);
+      });
+      if (!fittedInitial && count > 0) {
+        fittedInitial = true;
+        fitIfNeeded();
+      }
+      if (onChunk) onChunk(accepted);
+      if (isCurrent && !isCurrent()) return false;
+      await yieldToMain();
+    }
+    return !isCurrent || isCurrent();
+  }
+
+  function finish() {
+    const customPast = isCustomRangeInPast();
+    devices.forEach((device, deviceId) => {
+      const latest = device.lastPoint;
+      if (!latest) return;
+      const latestLat = Number(latest.latitude);
+      const latestLng = Number(latest.longitude);
+      if (!Number.isFinite(latestLat) || !Number.isFinite(latestLng)) return;
+      if (customPast || !isCurrentPoint(deviceId, latest.timestamp)) return;
+      if (device.lastMarker) {
+        ui.map.removeLayer(device.lastMarker);
+        const markerIndex = ui.routePointMarkers.indexOf(device.lastMarker);
+        if (markerIndex >= 0) ui.routePointMarkers.splice(markerIndex, 1);
+        device.lastMarker = null;
+      }
+      const marker = L.circleMarker([latestLat, latestLng], {
+        radius: getMapCssNumber("--map-live-point-radius", 7),
+        fillColor: device.stroke,
+        color: getMapCssVar("--map-live-point-border"),
+        weight: getMapCssNumber("--map-live-point-border-width", 2),
+        fillOpacity: getMapCssNumber("--map-live-point-fill-opacity", 1),
+        opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
+        className: "map-live-point map-live-point--pulse",
+      });
+      marker.bindTooltip(escapeHtml(formatRelativeTime(latest.timestamp)), {
+        permanent: true,
+        direction: "top",
+        offset: [0, -24],
+        className: "map-live-age-tooltip",
+      });
+      marker.bindPopup(buildPositionTooltipHtml(latest), {
+        className: "map-point-tooltip map-point-tooltip--live",
+      });
+      marker.addTo(ui.map);
+      addLivePointInitialMarker([latestLat, latestLng], getDeviceDisplayName(latest.device_id, latest.device_name));
+      ui.markers.set(deviceId, marker);
+    });
+    fitIfNeeded();
+    dispose();
+  }
+
+  return {
+    append,
+    finish,
+    dispose,
+    get count() {
+      return count;
+    },
+    get distanceMeters() {
+      return distanceMeters;
+    },
+  };
 }
 
-async function loadAllPositionsForRange(baseQuery, load) {
-  const allPositions = [];
-  let offset = 0;
+async function loadRouteIncrementally(baseQuery, load, session, hooks = {}) {
+  let cursor = null;
   let hasMore = true;
   let pages = 0;
   const stride = getActiveMapPointStride();
   while (hasMore) {
-    if (load && !load.isCurrent()) return null;
+    if (load && !load.isCurrent()) return false;
     pages += 1;
     if (pages > POSITIONS_MAX_PAGES) {
       throw new Error("Zu viele Positionsseiten geladen. Bitte Zeitraum eingrenzen.");
     }
     const pageQuery = new URLSearchParams(baseQuery.toString());
     pageQuery.set("limit", String(POSITIONS_PAGE_SIZE));
-    pageQuery.set("offset", String(offset));
+    pageQuery.set("order", "time");
     if (stride > 1) pageQuery.set("stride", String(stride));
+    if (!cursor) {
+      pageQuery.set("offset", "0");
+      pageQuery.set("include_total", "1");
+    } else {
+      pageQuery.set("after_epoch", String(cursor.timestamp_epoch));
+      pageQuery.set("after_seq", String(cursor.ingest_seq));
+    }
     const data = await api(`/api/positions?${pageQuery.toString()}`, load?.signal ? { signal: load.signal } : {});
+    if (load && !load.isCurrent()) return false;
     const positions = Array.isArray(data?.positions) ? data.positions : [];
-    allPositions.push(...positions);
     const pagination = data?.pagination || {};
     hasMore = Boolean(pagination.has_more);
     const returned = Number(pagination.returned ?? positions.length);
@@ -1805,10 +2286,28 @@ async function loadAllPositionsForRange(baseQuery, load) {
     if (hasMore && returned === 0) {
       throw new Error("Pagination konnte nicht fortgesetzt werden (0 Elemente mit has_more=true).");
     }
-    offset += returned;
+    const total = Number(pagination.total);
+    if (hooks.onPage) {
+      hooks.onPage({
+        hasMore,
+        total: Number.isFinite(total) ? total : null,
+      });
+    }
+    if (hasMore) {
+      const next = pagination.cursor;
+      if (next?.timestamp_epoch == null || next?.ingest_seq == null) {
+        throw new Error("Pagination konnte nicht fortgesetzt werden.");
+      }
+      cursor = next;
+    }
+    const appended = await session.append(positions, {
+      isCurrent: () => !load || load.isCurrent(),
+      onChunk: hooks.onChunk,
+      beforePoints: hooks.beforePoints,
+    });
+    if (!appended) return false;
   }
-  if (load && !load.isCurrent()) return null;
-  return normalizeAndSortPositions(allPositions);
+  return !load || load.isCurrent();
 }
 
 function resolveRangeQuery(range, customFrom, customTo) {
@@ -1853,92 +2352,6 @@ function isCurrentPoint(deviceId, latestTs) {
   const status = state.deviceStatuses[deviceId];
   if (!status?.last_seen || !latestTs) return false;
   return String(status.last_seen) === String(latestTs);
-}
-
-function drawPositions(positions, opts = {}) {
-  const preserveView = !!opts.preserveView;
-  clearMapOverlays();
-  const visible = state.visibleDeviceIds;
-  const filtered = positions.filter((p) => p.device_id && visible.has(p.device_id));
-  if (!filtered.length) {
-    setMapRouteStats({ count: 0, distanceMeters: 0 });
-    return 0;
-  }
-
-  const byDevice = new Map();
-  filtered.forEach((p) => {
-    if (!byDevice.has(p.device_id)) byDevice.set(p.device_id, []);
-    byDevice.get(p.device_id).push(p);
-  });
-
-  const allLatLng = [];
-  const customPast = isCustomRangeInPast();
-  let distanceMeters = 0;
-  byDevice.forEach((items, deviceId) => {
-    items.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
-    const route = items.map((item) => [item.latitude, item.longitude]);
-    distanceMeters += routeDistanceMeters(route);
-    allLatLng.push(...route);
-    const colorIdx = getDeviceColorIndex(deviceId);
-    const stroke = resolvePaletteColor(colorIdx);
-    const line = L.polyline(route, {
-      color: stroke,
-      weight: getMapCssNumber("--map-route-line-width", 3),
-      opacity: getMapCssNumber("--map-route-line-opacity", 0.9),
-    }).addTo(ui.map);
-    ui.routeLines.push(line);
-
-    const latest = items[items.length - 1];
-    const shouldTreatLatestAsLive = !customPast && isCurrentPoint(deviceId, latest?.timestamp);
-    const pointsToRender = shouldTreatLatestAsLive ? items.slice(0, -1) : items;
-    pointsToRender.forEach((point) => {
-      const routePoint = L.circleMarker([point.latitude, point.longitude], {
-        radius: getMapCssNumber("--map-route-point-radius", 3),
-        fillColor: getMapCssVar("--map-route-point-fill"),
-        color: getMapCssVar("--map-route-point-stroke"),
-        weight: getMapCssNumber("--map-route-point-stroke-width", 1),
-        fillOpacity: getMapCssNumber("--map-route-point-fill-opacity", 1),
-        opacity: getMapCssNumber("--map-route-point-stroke-opacity", 1),
-        className: "map-route-point",
-      }).addTo(ui.map);
-      routePoint.bindTooltip(buildPositionTooltipHtml(point), {
-        sticky: true,
-        className: "map-point-tooltip",
-      });
-      bindRoutePointInteractions(routePoint);
-      ui.routePointMarkers.push(routePoint);
-    });
-
-    if (!shouldTreatLatestAsLive) return;
-    const marker = L.circleMarker([latest.latitude, latest.longitude], {
-      radius: getMapCssNumber("--map-live-point-radius", 7),
-      fillColor: stroke,
-      color: getMapCssVar("--map-live-point-border"),
-      weight: getMapCssNumber("--map-live-point-border-width", 2),
-      fillOpacity: getMapCssNumber("--map-live-point-fill-opacity", 1),
-      opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
-      className: "map-live-point map-live-point--pulse",
-    });
-    marker.bindTooltip(escapeHtml(formatRelativeTime(latest.timestamp)), {
-      permanent: true,
-      direction: "top",
-      offset: [0, -24],
-      className: "map-live-age-tooltip",
-    });
-    marker.bindPopup(buildPositionTooltipHtml(latest), {
-      className: "map-point-tooltip map-point-tooltip--live",
-    });
-    marker.addTo(ui.map);
-    addLivePointInitialMarker([latest.latitude, latest.longitude], getDeviceDisplayName(latest.device_id, latest.device_name));
-    ui.markers.set(latest.device_id, marker);
-  });
-
-  if (!preserveView) {
-    const bounds = L.latLngBounds(allLatLng);
-    if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
-  }
-  setMapRouteStats({ count: filtered.length, distanceMeters });
-  return filtered.length;
 }
 
 function renderDevicesSection() {

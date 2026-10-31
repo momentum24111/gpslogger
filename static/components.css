@@ -609,11 +609,13 @@ main {
   justify-self: start;
   min-width: 0;
   max-width: 100%;
-  height: calc(var(--leaflet-zoom-btn-size) + 1px);
+  height: calc(var(--leaflet-zoom-btn-size) * 2 + 2px);
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0 0.6rem;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 0;
+  padding: 0;
   cursor: default;
   background: var(--leaflet-control-bg, var(--card-bg, var(--color-surface)));
   color: var(--leaflet-control-fg, var(--color-text));
@@ -621,6 +623,16 @@ main {
   font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1;
+}
+
+.map-route-stats-summary {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.55rem;
   white-space: nowrap;
 }
 
@@ -638,6 +650,130 @@ main {
 
 .map-route-stats-distance {
   flex: none;
+}
+
+.map-route-stats-download {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0.45rem;
+  border: none;
+  border-top: 1px solid var(--leaflet-control-border, var(--color-border));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.map-route-stats-download:hover:not(:disabled) {
+  background: var(--leaflet-control-hover-bg, var(--color-hover));
+  color: var(--leaflet-control-hover-fg, var(--color-text));
+}
+
+.map-route-stats-download:disabled:not([data-loading="true"]) {
+  cursor: default;
+  color: var(--color-text-muted);
+}
+
+.map-route-stats-download[data-loading="true"] {
+  cursor: progress;
+}
+
+.map-route-stats-download-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-route-stats-download .material-symbols-outlined {
+  flex: none;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.map-route-stats-spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  border: 2px solid var(--spinner-track, var(--color-border));
+  border-top-color: var(--spinner-head, var(--color-primary));
+  animation: restart-wait-spin 0.75s linear infinite;
+  flex: none;
+}
+
+.map-route-stats-spinner[hidden],
+.map-route-stats-download .material-symbols-outlined[hidden] {
+  display: none;
+}
+
+.map-route-stats-loading {
+  display: none;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding: 0.4rem 0.55rem 0.45rem;
+  border-top: 1px solid var(--leaflet-control-border, var(--color-border));
+  min-width: 11.5rem;
+}
+
+.leaflet-route-stats--loading {
+  height: auto;
+}
+
+.leaflet-route-stats--loading .map-route-stats-summary,
+.leaflet-route-stats--loading .map-route-stats-download {
+  flex: 0 0 var(--leaflet-zoom-btn-size);
+  height: var(--leaflet-zoom-btn-size);
+}
+
+.leaflet-route-stats--loading .map-route-stats-loading:not([hidden]) {
+  display: flex;
+}
+
+.map-route-stats-loading-label,
+.map-route-stats-loading-spinner-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-route-stats-loading-spinner-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.map-route-stats-loading-track {
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.map-route-stats-loading-bar {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.map-route-stats-loading-label[hidden],
+.map-route-stats-loading-track[hidden],
+.map-route-stats-loading-spinner-row[hidden] {
+  display: none;
 }
 
 .map-wrap .leaflet-bar {
@@ -710,7 +846,7 @@ main {
 
 @media (max-width: 640px) {
   .map-overlay {
-    top: calc(var(--leaflet-control-offset) + var(--leaflet-zoom-btn-size) + 1px + var(--spacing-sm));
+    top: calc(var(--leaflet-control-offset) + (var(--leaflet-zoom-btn-size) * 2) + 2px + var(--spacing-sm));
   }
 
   .map-wrap .leaflet-top.leaflet-left {

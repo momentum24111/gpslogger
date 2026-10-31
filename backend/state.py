@@ -1534,37 +1534,28 @@ class AppState:
         limit: int = 500,
         offset: int = 0,
         stride: int | None = None,
+        device_ids: list[str] | None = None,
+        order: str = "ingest",
+        after_epoch: float | None = None,
+        after_seq: int | None = None,
+        include_total: bool = False,
     ) -> tuple[list[dict[str, Any]], bool]:
-        if self._positions_db_ready or self.gps_db_path.exists():
-            try:
-                # Kurzlebige Connection; kein Teilen über Threads.
-                conn = self._open_positions_db()
-                try:
-                    if not self._positions_db_ready:
-                        positions_db.init_schema(conn)
-                    return positions_db.query_positions(
-                        conn,
-                        device_names,
-                        ts_from,
-                        ts_to,
-                        limit=limit,
-                        offset=offset,
-                        stride=stride,
-                    )
-                finally:
-                    conn.close()
-            except Exception as exc:
-                print(f"[positions-db] query failed, falling back to ndjson: {exc}")
-        return self._query_positions_from_ndjson(
+        page = self.query_position_page(
             device_names,
             ts_from,
             ts_to,
             limit=limit,
             offset=offset,
             stride=stride,
+            device_ids=device_ids,
+            order=order,
+            after_epoch=after_epoch,
+            after_seq=after_seq,
+            include_total=include_total,
         )
+        return page.rows, page.has_more
 
-    def _query_positions_from_ndjson(
+    def query_position_page(
         self,
         device_names: list[str] | None,
         ts_from: str | None,
@@ -1573,9 +1564,83 @@ class AppState:
         limit: int = 500,
         offset: int = 0,
         stride: int | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
+        device_ids: list[str] | None = None,
+        order: str = "ingest",
+        after_epoch: float | None = None,
+        after_seq: int | None = None,
+        include_total: bool = False,
+    ) -> positions_db.PositionPage:
+        if self._positions_db_ready or self.gps_db_path.exists():
+            try:
+                # Kurzlebige Connection; kein Teilen über Threads.
+                conn = self._open_positions_db()
+                try:
+                    if not self._positions_db_ready:
+                        positions_db.init_schema(conn)
+                    return positions_db.query_position_page(
+                        conn,
+                        device_names,
+                        ts_from,
+                        ts_to,
+                        limit=limit,
+                        offset=offset,
+                        stride=stride,
+                        device_ids=device_ids,
+                        order=order,
+                        after_epoch=after_epoch,
+                        after_seq=after_seq,
+                        include_total=include_total,
+                    )
+                finally:
+                    conn.close()
+            except Exception as exc:
+                print(f"[positions-db] query failed, falling back to ndjson: {exc}")
+        return self._query_position_page_from_ndjson(
+            device_names,
+            ts_from,
+            ts_to,
+            limit=limit,
+            offset=offset,
+            stride=stride,
+            device_ids=device_ids,
+            order=order,
+            after_epoch=after_epoch,
+            after_seq=after_seq,
+            include_total=include_total,
+        )
+
+    def _query_position_page_from_ndjson(
+        self,
+        device_names: list[str] | None,
+        ts_from: str | None,
+        ts_to: str | None,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+        stride: int | None = None,
+        device_ids: list[str] | None = None,
+        order: str = "ingest",
+        after_epoch: float | None = None,
+        after_seq: int | None = None,
+        include_total: bool = False,
+    ) -> positions_db.PositionPage:
+        empty_total = 0 if include_total else None
+        if order not in ("ingest", "time"):
+            raise ValueError("order")
+        if (after_epoch is None) != (after_seq is None):
+            raise ValueError("cursor")
+        if after_epoch is not None and order != "time":
+            raise ValueError("cursor")
         if not self.gps_path.exists():
-            return [], False
+            return positions_db.PositionPage([], False, empty_total)
+
+        wanted_ids: set[str] | None
+        if device_ids is None:
+            wanted_ids = None
+        else:
+            wanted_ids = {str(device_id).strip() for device_id in device_ids if str(device_id).strip()}
+            if not wanted_ids:
+                return positions_db.PositionPage([], False, empty_total)
 
         def parse_time_utc(value: Any) -> datetime | None:
             if not value:
@@ -1597,14 +1662,16 @@ class AppState:
             if not normalized_device_names:
                 normalized_device_names = None
         safe_limit = max(1, min(5000, int(limit)))
-        safe_offset = max(0, int(offset))
+        safe_offset = 0 if after_epoch is not None else max(0, int(offset))
         use_stride = isinstance(stride, int) and stride > 1
+        materialize = use_stride or order == "time" or include_total or after_epoch is not None
 
         rows: list[dict[str, Any]] = []
-        matched: list[dict[str, Any]] = []
+        matched: list[tuple[float | None, int, int, dict[str, Any]]] = []
         skipped = 0
         has_more = False
         skipped_invalid_timestamp = 0
+        file_index = 0
         with self.gps_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -1617,6 +1684,10 @@ class AppState:
                     item_device_name = str(item.get("device_name", "")).strip().lower()
                     if item_device_name not in normalized_device_names:
                         continue
+                if wanted_ids is not None:
+                    item_device_id = str(item.get("device_id") or "").strip()
+                    if item_device_id not in wanted_ids:
+                        continue
                 item_time = parse_time_utc(item.get("timestamp")) or parse_time_utc(item.get("received_at"))
                 if (left or right) and item_time is None:
                     skipped_invalid_timestamp += 1
@@ -1628,8 +1699,16 @@ class AppState:
                 row = self._position_row_from_stored(item)
                 if row is None:
                     continue
-                if use_stride:
-                    matched.append(row)
+                if materialize:
+                    try:
+                        seq = int(item.get("ingest_seq"))
+                    except (TypeError, ValueError):
+                        seq = file_index
+                    epoch = item_time.timestamp() if item_time is not None else positions_db.timestamp_to_epoch(
+                        item.get("timestamp") or item.get("received_at")
+                    )
+                    matched.append((epoch, seq, file_index, row))
+                    file_index += 1
                     continue
                 if skipped < safe_offset:
                     skipped += 1
@@ -1643,11 +1722,153 @@ class AppState:
                 f"[positions] skipped {skipped_invalid_timestamp} entries with invalid or missing timestamps "
                 "for from/to filtering"
             )
+        if not materialize:
+            return positions_db.PositionPage(rows, has_more, None)
+
+        ordered_rows = [entry[3] for entry in matched]
+        keyed = matched
         if use_stride:
-            thinned = positions_db.thin_positions_by_stride(matched, int(stride))
-            page = thinned[safe_offset : safe_offset + safe_limit]
-            return page, safe_offset + safe_limit < len(thinned)
-        return rows, has_more
+            thinned = positions_db.thin_positions_by_stride(ordered_rows, int(stride))
+            kept = {id(row) for row in thinned}
+            keyed = [entry for entry in matched if id(entry[3]) in kept]
+        if order == "time":
+            keyed = sorted(keyed, key=lambda entry: (entry[0] is None, entry[0] if entry[0] is not None else 0.0, entry[1], entry[2]))
+        total = len(keyed) if include_total else None
+        if after_epoch is not None:
+            cursor_epoch = float(after_epoch)
+            cursor_seq = int(after_seq or 0)
+            keyed = [
+                entry
+                for entry in keyed
+                if entry[0] is not None and (entry[0] > cursor_epoch or (entry[0] == cursor_epoch and entry[1] > cursor_seq))
+            ]
+        page_rows = [entry[3] for entry in keyed[safe_offset : safe_offset + safe_limit]]
+        page_has_more = safe_offset + safe_limit < len(keyed)
+        cursor_epoch_text: str | None = None
+        cursor_seq_value: int | None = None
+        if order == "time" and page_rows:
+            last = keyed[safe_offset + len(page_rows) - 1]
+            if last[0] is not None:
+                cursor_epoch_text = positions_db.format_cursor_epoch(last[0])
+                cursor_seq_value = int(last[1])
+        return positions_db.PositionPage(
+            page_rows,
+            page_has_more,
+            total,
+            cursor_epoch_text,
+            cursor_seq_value,
+        )
+
+    def iter_gpx_positions(
+        self,
+        device_ids: list[str],
+        ts_from: str | None,
+        ts_to: str | None,
+    ):
+        """Vollständige Punkte für den GPX-Export, ohne Karten-Punktdichte."""
+        ids = [str(device_id).strip() for device_id in device_ids if str(device_id).strip()]
+        if not ids:
+            return
+        if self._positions_db_ready or self.gps_db_path.exists():
+            try:
+                conn = self._open_positions_db()
+                if not self._positions_db_ready:
+                    positions_db.init_schema(conn)
+            except Exception as exc:
+                print(f"[positions-db] gpx query failed, falling back to ndjson: {exc}")
+            else:
+                try:
+                    yield from positions_db.iter_full_positions(conn, ids, ts_from, ts_to)
+                finally:
+                    conn.close()
+                return
+        yield from self._iter_gpx_positions_from_ndjson(ids, ts_from, ts_to)
+
+    def _iter_gpx_positions_from_ndjson(
+        self,
+        device_ids: list[str],
+        ts_from: str | None,
+        ts_to: str | None,
+    ):
+        if not self.gps_path.exists():
+            return
+        wanted = {str(device_id).strip() for device_id in device_ids if str(device_id).strip()}
+        if not wanted:
+            return
+
+        def parse_time_utc(value: Any) -> datetime | None:
+            if not value:
+                return None
+            try:
+                parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+
+        left = parse_time_utc(ts_from)
+        right = parse_time_utc(ts_to)
+        matched: list[dict[str, Any]] = []
+        with self.gps_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                device_id = str(item.get("device_id") or "").strip()
+                if device_id not in wanted:
+                    continue
+                item_time = parse_time_utc(item.get("timestamp")) or parse_time_utc(item.get("received_at"))
+                if (left or right) and item_time is None:
+                    continue
+                if left and item_time and item_time < left:
+                    continue
+                if right and item_time and item_time > right:
+                    continue
+                row = self._position_row_from_stored(item)
+                if row is None:
+                    continue
+                matched.append(row)
+        matched.sort(
+            key=lambda row: (
+                str(row.get("device_id") or ""),
+                parse_time_utc(row.get("timestamp")).timestamp() if parse_time_utc(row.get("timestamp")) else 0.0,
+            )
+        )
+        yield from matched
+
+    def iter_current_gpx_positions(self, device_ids: list[str]):
+        """Je ausgewähltem Gerät nur die aktuelle Position."""
+        statuses = self.get_device_statuses()
+        names = {str(device.get("id") or ""): device.get("name") for device in self.list_devices()}
+        for device_id in device_ids:
+            cleaned = str(device_id).strip()
+            if not cleaned:
+                continue
+            status = statuses.get(cleaned)
+            if not status:
+                continue
+            yield {
+                "device_id": cleaned,
+                "device_name": names.get(cleaned) or cleaned,
+                "latitude": status.get("latitude"),
+                "longitude": status.get("longitude"),
+                "altitude": status.get("altitude"),
+                "timestamp": status.get("last_seen"),
+            }
+
+    def gpx_device_label(self, device_ids: list[str]) -> str | None:
+        if len(device_ids) != 1:
+            return None
+        wanted = str(device_ids[0]).strip()
+        for device in self.list_devices():
+            if str(device.get("id") or "") == wanted:
+                name = str(device.get("name") or "").strip()
+                return name or None
+        return None
 
     def get_device_statuses(self) -> dict[str, dict[str, Any]]:
         with self._lock:
