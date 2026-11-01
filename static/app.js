@@ -1138,13 +1138,13 @@ function renderMapRouteStats() {
   );
   const button = el.querySelector(".map-route-stats-download");
   if (!button) return;
-  const loading = button.dataset.loading === "true" || ui.gpxExporting;
+  const gpxLoading = button.dataset.loading === "true" || ui.gpxExporting;
   const label = button.querySelector(".map-route-stats-download-label");
-  const text = loading ? t("map.stats.gpx.preparing") : t("map.stats.gpx.download");
+  const text = gpxLoading ? t("map.stats.gpx.preparing") : t("map.stats.gpx.download");
   if (label) label.textContent = text;
-  button.title = loading || ui.mapRouteStatsCount > 0 ? text : t("map.stats.gpx.empty");
+  button.title = gpxLoading || ui.mapRouteStatsCount > 0 ? text : t("map.stats.gpx.empty");
   button.setAttribute("aria-label", text);
-  button.disabled = loading || ui.mapRouteStatsCount <= 0;
+  button.disabled = gpxLoading || ui.mapRouteStatsCount <= 0;
 }
 
 function setMapRouteStats({ count = 0, distanceMeters = 0 } = {}) {
@@ -1204,9 +1204,9 @@ function initMapRouteStatsControl() {
       const icon = L.DomUtil.create("span", "material-symbols-outlined", button);
       icon.setAttribute("aria-hidden", "true");
       icon.textContent = "download";
-      const spinner = L.DomUtil.create("span", "map-route-stats-spinner", button);
-      spinner.hidden = true;
-      spinner.setAttribute("aria-hidden", "true");
+      const downloadSpinner = L.DomUtil.create("span", "map-route-stats-spinner", button);
+      downloadSpinner.hidden = true;
+      downloadSpinner.setAttribute("aria-hidden", "true");
       L.DomUtil.create("span", "map-route-stats-download-label", button);
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
