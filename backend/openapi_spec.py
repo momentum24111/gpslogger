@@ -859,6 +859,46 @@ def build_openapi_spec() -> dict:
                     },
                 }
             },
+            "/api/positions/profile": {
+                "get": {
+                    "tags": ["Daten"],
+                    "summary": "Volle Streckendistanz und reduziertes Höhenprofil",
+                    "description": (
+                        "Berechnet die Distanz aus allen gültigen GPS-Punkten der angegebenen Geräte "
+                        "im Zeitraum. Die Punktdichte der Karte wird nicht angewendet. "
+                        "Das Höhenprofil ist für die Darstellung reduziert und behält Höhenextrema."
+                    ),
+                    "operationId": "getPositionsProfile",
+                    "parameters": [
+                        {
+                            "name": "device_id",
+                            "in": "query",
+                            "required": True,
+                            "schema": {"type": "string"},
+                            "description": "Geräte-ID. Mehrfach möglich oder als CSV.",
+                        },
+                        {
+                            "name": "from",
+                            "in": "query",
+                            "required": True,
+                            "schema": {"type": "string", "format": "date-time"},
+                        },
+                        {
+                            "name": "to",
+                            "in": "query",
+                            "required": True,
+                            "schema": {"type": "string", "format": "date-time"},
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Distanz und Profilpunkte je Gerät",
+                            "content": {"application/json": {"schema": {"type": "object"}}},
+                        },
+                        "400": {"$ref": "#/components/responses/BadRequestJson"},
+                    },
+                }
+            },
             "/api/positions/gpx": {
                 "get": {
                     "tags": ["Daten"],

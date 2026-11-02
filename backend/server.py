@@ -12,6 +12,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from .gpx_export import GpxExportEmpty, content_disposition, gpx_filename, iter_gpx_chunks
+from .route_profile import build_route_profile
 from .openapi_spec import build_openapi_spec
 from .locale_bundle import normalize_ui_language, translate
 from .positions_db import parse_position_stride
@@ -572,6 +573,41 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    def _route_profile(self, query: dict[str, list[str]]):
+        """Distanz und Höhenprofil aus allen gespeicherten Punkten, ohne Karten-Punktdichte."""
+        device_ids = parse_id_list(query, "device_id")
+        if not device_ids:
+            return json_response(
+                self,
+                {"error": "Keine Geräte ausgewählt.", "error_key": "map.stats.gpx.noDevices"},
+                HTTPStatus.BAD_REQUEST,
+            )
+        query_from = query.get("from", [None])[0] or None
+        query_to = query.get("to", [None])[0] or None
+        left = parse_query_time(query_from)
+        right = parse_query_time(query_to)
+        if not query_from or not query_to or left is None or right is None or left > right:
+            return json_response(
+                self,
+                {"error": "from und to sind erforderlich (ISO-8601)", "error_key": "map.elevation.failed"},
+                HTTPStatus.BAD_REQUEST,
+            )
+        rows = state.iter_gpx_positions(device_ids, query_from, query_to)
+        try:
+            payload = build_route_profile(rows)
+        except Exception as exc:
+            print(f"[profile] failed: {exc}")
+            return json_response(
+                self,
+                {"error": "Das Höhenprofil konnte nicht geladen werden.", "error_key": "map.elevation.failed"},
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+        finally:
+            closer = getattr(rows, "close", None)
+            if closer is not None:
+                closer()
+        return json_response(self, payload)
+
     def _gpx_download(self, query: dict[str, list[str]]):
         device_ids = parse_id_list(query, "device_id")
         if not device_ids:
@@ -874,6 +910,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._sse_positions_stream()
         if route == "/api/themes":
             return json_response(self, {"themes": discover_themes()})
+        if route == "/api/positions/profile":
+            return self._route_profile(query)
         if route == "/api/positions/gpx":
             return self._gpx_download(query)
         if route == "/api/positions":

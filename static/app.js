@@ -122,6 +122,7 @@ function updateVisibleTexts() {
     if (label) label.textContent = text;
   });
   renderMapRouteStats();
+  refreshElevationTexts();
 
   const fromLabel = document.querySelector('#map-from')?.closest(".field")?.querySelector("span");
   const toLabel = document.querySelector('#map-to')?.closest(".field")?.querySelector("span");
@@ -306,6 +307,13 @@ const ui = {
   mapRouteStatsCount: 0,
   mapRouteStatsDistanceMeters: 0,
   gpxExporting: false,
+  routeClickPoints: [],
+  elevationProfile: null,
+  elevationMarker: null,
+  elevationHover: null,
+  elevationHoverFrame: 0,
+  elevationPointerDown: false,
+  elevationStatusKey: "",
   mapRouteLoading: null,
   mapRangeLoadActive: false,
   layers: {},
@@ -669,6 +677,10 @@ function addLivePointInitialMarker(latLng, deviceName) {
 }
 
 function closePinnedRouteTooltip() {
+  if (ui.pinnedRouteTooltip) {
+    ui.map?.removeLayer(ui.pinnedRouteTooltip);
+    ui.pinnedRouteTooltip = null;
+  }
   if (!ui.pinnedRouteTooltipMarker) return;
   ui.pinnedRouteTooltipMarker.__tooltipPinned = false;
   const pinnedTooltip = ui.pinnedRouteTooltipMarker.getTooltip?.();
@@ -718,7 +730,9 @@ function clearMapOverlays() {
   ui.routeLines = [];
   ui.routePointMarkers.forEach((marker) => ui.map.removeLayer(marker));
   ui.routePointMarkers = [];
+  ui.routeClickPoints = [];
   closePinnedRouteTooltip();
+  clearElevationHover();
 }
 
 async function drawCurrentPositionsOnly({ preserveView = false, signal, isCurrent } = {}) {
@@ -766,9 +780,10 @@ async function drawCurrentPositionsOnly({ preserveView = false, signal, isCurren
   });
   if (!preserveView && allLatLng.length) {
     const bounds = L.latLngBounds(allLatLng);
-    if (bounds.isValid()) ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
+    if (bounds.isValid()) ui.map.fitBounds(bounds, { ...mapBoundsFitOptions(), maxZoom: 18 });
   }
   setMapRouteStats({ count: renderedCount, distanceMeters: 0 });
+  hideElevationProfile();
   return renderedCount;
 }
 
@@ -978,7 +993,7 @@ function zoomMapToVisiblePoints() {
   const bounds = L.latLngBounds(points);
   if (!bounds.isValid()) return;
   ui.map.fitBounds(bounds, {
-    padding: [24, 24],
+    ...mapBoundsFitOptions(),
     maxZoom: 18,
     animate: true,
     duration: 0.35,
@@ -1680,10 +1695,427 @@ function closeSettingsModal() {
   dismissSettingsRoute();
 }
 
+function elevationPanel() {
+  return document.getElementById("elevation-profile");
+}
+
+function mapBoundsFitOptions() {
+  const panel = elevationPanel();
+  const bottom = panel && !panel.hidden ? panel.offsetHeight + 16 : 30;
+  return {
+    paddingTopLeft: [30, 30],
+    paddingBottomRight: [30, Math.max(30, bottom)],
+  };
+}
+
+function formatElevationMeters(value) {
+  if (!Number.isFinite(value)) return "—";
+  return t("map.elevation.meters", { elevation: ROUTE_STATS_METERS_FORMAT.format(Math.round(value)) });
+}
+
+function openNearestRouteTooltip(latlng) {
+  if (!latlng || !ui.map || !ui.routeClickPoints.length) return;
+  let best = null;
+  let bestDistance = Infinity;
+  ui.routeClickPoints.forEach((point) => {
+    const lat = Number(point.latitude);
+    const lon = Number(point.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const distance = haversineDistanceMeters(latlng.lat, latlng.lng, lat, lon);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = point;
+    }
+  });
+  if (!best) return;
+  closePinnedRouteTooltip();
+  const tooltip = L.tooltip({
+    className: "map-point-tooltip",
+    permanent: true,
+    direction: "top",
+    offset: [0, -6],
+    opacity: 1,
+  });
+  tooltip.setLatLng([Number(best.latitude), Number(best.longitude)]);
+  tooltip.setContent(buildPositionTooltipHtml(best));
+  tooltip.addTo(ui.map);
+  ui.pinnedRouteTooltip = tooltip;
+}
+
+function clearElevationHover() {
+  ui.elevationHover = null;
+  if (ui.elevationHoverFrame) {
+    cancelAnimationFrame(ui.elevationHoverFrame);
+    ui.elevationHoverFrame = 0;
+  }
+  const readout = document.getElementById("elevation-profile-readout");
+  if (readout) readout.hidden = true;
+  if (ui.elevationMarker) {
+    ui.map?.removeLayer(ui.elevationMarker);
+    ui.elevationMarker = null;
+  }
+}
+
+function hideElevationProfile() {
+  ui.elevationProfile = null;
+  ui.elevationStatusKey = "";
+  clearElevationHover();
+  const panel = elevationPanel();
+  if (panel) panel.hidden = true;
+}
+
+function showElevationStatus(key) {
+  ui.elevationProfile = null;
+  clearElevationHover();
+  ui.elevationStatusKey = key;
+  const panel = elevationPanel();
+  if (!panel) return;
+  panel.hidden = false;
+  const status = document.getElementById("elevation-profile-status");
+  if (status) {
+    status.hidden = false;
+    status.textContent = t(key);
+  }
+  drawElevationCanvas();
+}
+
+function showElevationLoading() {
+  showElevationStatus("map.elevation.loading");
+}
+
+async function loadRouteProfile(baseQuery, signal) {
+  return api(`/api/positions/profile?${baseQuery.toString()}`, signal ? { signal } : {});
+}
+
+function renderElevationProfile(profile) {
+  const devices = Array.isArray(profile?.devices)
+    ? profile.devices.filter((device) => Array.isArray(device.samples) && device.samples.length)
+    : [];
+  if (!devices.length) {
+    hideElevationProfile();
+    return;
+  }
+  ui.elevationProfile = { ...profile, devices };
+  const panel = elevationPanel();
+  if (!panel) return;
+  panel.hidden = false;
+  const hasElevation = devices.some((device) => device.samples.some((sample) => Number.isFinite(Number(sample.ele))));
+  const status = document.getElementById("elevation-profile-status");
+  if (!hasElevation) {
+    ui.elevationStatusKey = "map.elevation.empty";
+    if (status) {
+      status.hidden = false;
+      status.textContent = t(ui.elevationStatusKey);
+    }
+  } else {
+    ui.elevationStatusKey = "";
+    if (status) status.hidden = true;
+  }
+  clearElevationHover();
+  drawElevationCanvas();
+}
+
+function refreshElevationTexts() {
+  const panel = elevationPanel();
+  if (panel) panel.setAttribute("aria-label", t("map.elevation.aria"));
+  if (ui.elevationStatusKey) {
+    const status = document.getElementById("elevation-profile-status");
+    if (status && !status.hidden) status.textContent = t(ui.elevationStatusKey);
+  }
+  drawElevationCanvas();
+}
+
+function elevationSeriesColor(deviceId, index) {
+  const known = state.devices.some((device) => device.id === deviceId);
+  const colorIndex = known ? getDeviceColorIndex(deviceId) : index % MAP_COLOR_COUNT;
+  return resolvePaletteColor(colorIndex);
+}
+
+function elevationChartLayout(width, height, profile) {
+  const pad = { left: 46, right: 14, top: 22, bottom: 22 };
+  let maxDistance = 0;
+  let minElevation = Infinity;
+  let maxElevation = -Infinity;
+  profile.devices.forEach((device) => {
+    maxDistance = Math.max(maxDistance, Number(device.distance_m) || 0);
+    device.samples.forEach((sample) => {
+      maxDistance = Math.max(maxDistance, Number(sample.d) || 0);
+      const elevation = Number(sample.ele);
+      if (!Number.isFinite(elevation)) return;
+      minElevation = Math.min(minElevation, elevation);
+      maxElevation = Math.max(maxElevation, elevation);
+    });
+  });
+  if (!Number.isFinite(minElevation) || !Number.isFinite(maxElevation)) {
+    minElevation = 0;
+    maxElevation = 1;
+  }
+  if (minElevation === maxElevation) {
+    minElevation -= 10;
+    maxElevation += 10;
+  } else {
+    const padding = (maxElevation - minElevation) * 0.08;
+    minElevation -= padding;
+    maxElevation += padding;
+  }
+  if (!(maxDistance > 0)) maxDistance = 1;
+  const plotWidth = Math.max(1, width - pad.left - pad.right);
+  const plotHeight = Math.max(1, height - pad.top - pad.bottom);
+  return {
+    pad,
+    maxDistance,
+    minElevation,
+    maxElevation,
+    plotWidth,
+    plotHeight,
+    x(distance) {
+      return pad.left + (distance / maxDistance) * plotWidth;
+    },
+    y(elevation) {
+      return pad.top + (1 - (elevation - minElevation) / (maxElevation - minElevation)) * plotHeight;
+    },
+  };
+}
+
+function nearestElevationSample(samples, distance) {
+  if (!samples.length) return null;
+  let low = 0;
+  let high = samples.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (Number(samples[mid].d) < distance) low = mid + 1;
+    else high = mid;
+  }
+  const next = samples[low];
+  const previous = samples[Math.max(0, low - 1)];
+  if (!previous || previous === next) return next;
+  return Math.abs(Number(previous.d) - distance) <= Math.abs(Number(next.d) - distance) ? previous : next;
+}
+
+function drawElevationCanvas() {
+  const canvas = document.getElementById("elevation-profile-canvas");
+  const panel = elevationPanel();
+  if (!canvas || !panel || panel.hidden) return;
+  const cssWidth = canvas.clientWidth;
+  const cssHeight = canvas.clientHeight;
+  if (!cssWidth || !cssHeight) return;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const pixelWidth = Math.round(cssWidth * pixelRatio);
+  const pixelHeight = Math.round(cssHeight * pixelRatio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx || ui.elevationDrawing) return;
+  ui.elevationDrawing = true;
+  try {
+  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  const profile = ui.elevationProfile;
+  if (!profile?.devices?.length) return;
+  const layout = elevationChartLayout(cssWidth, cssHeight, profile);
+  const grid = getMapCssVar("--elevation-panel-grid", getMapCssVar("--color-border"));
+  const muted = getMapCssVar("--elevation-panel-muted", getMapCssVar("--color-text-muted"));
+  const cursor = getMapCssVar("--elevation-cursor", getMapCssVar("--color-text"));
+  ctx.font = '600 11px "IBM Plex Sans", system-ui, sans-serif';
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = grid;
+  ctx.fillStyle = muted;
+  ctx.lineWidth = 1;
+  for (let tick = 0; tick < 3; tick += 1) {
+    const elevation = layout.minElevation + ((layout.maxElevation - layout.minElevation) * tick) / 2;
+    const y = layout.y(elevation);
+    ctx.beginPath();
+    ctx.moveTo(layout.pad.left, y);
+    ctx.lineTo(layout.pad.left + layout.plotWidth, y);
+    ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.fillText(ROUTE_STATS_METERS_FORMAT.format(Math.round(elevation)), layout.pad.left - 6, y);
+  }
+  ctx.textBaseline = "top";
+  const distanceTicks = cssWidth < 560 ? 3 : 4;
+  for (let tick = 0; tick < distanceTicks; tick += 1) {
+    const distance = (layout.maxDistance * tick) / (distanceTicks - 1);
+    const x = layout.x(distance);
+    ctx.textAlign = tick === 0 ? "left" : tick === distanceTicks - 1 ? "right" : "center";
+    ctx.fillText(formatRouteDistance(distance), x, layout.pad.top + layout.plotHeight + 4);
+  }
+  profile.devices.forEach((device, index) => {
+    const color = elevationSeriesColor(device.device_id, index);
+    let run = [];
+    const flush = () => {
+      if (run.length < 1) return;
+      const baseY = layout.pad.top + layout.plotHeight;
+      if (run.length >= 2) {
+        ctx.beginPath();
+        run.forEach((sample, sampleIndex) => {
+          const x = layout.x(Number(sample.d) || 0);
+          const y = layout.y(Number(sample.ele));
+          if (sampleIndex === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.lineTo(layout.x(Number(run[run.length - 1].d) || 0), baseY);
+        ctx.lineTo(layout.x(Number(run[0].d) || 0), baseY);
+        ctx.closePath();
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        run.forEach((sample, sampleIndex) => {
+          const x = layout.x(Number(sample.d) || 0);
+          const y = layout.y(Number(sample.ele));
+          if (sampleIndex === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.stroke();
+      }
+      run = [];
+    };
+    device.samples.forEach((sample) => {
+      if (!Number.isFinite(Number(sample.ele))) {
+        flush();
+        return;
+      }
+      run.push(sample);
+    });
+    flush();
+  });
+  if (ui.elevationHover?.sample) {
+    const x = layout.x(Number(ui.elevationHover.sample.d) || 0);
+    ctx.beginPath();
+    ctx.moveTo(x, layout.pad.top);
+    ctx.lineTo(x, layout.pad.top + layout.plotHeight);
+    ctx.strokeStyle = cursor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    if (Number.isFinite(Number(ui.elevationHover.sample.ele))) {
+      const y = layout.y(Number(ui.elevationHover.sample.ele));
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = ui.elevationHover.color;
+      ctx.fill();
+    }
+  }
+  } finally {
+    ui.elevationDrawing = false;
+  }
+}
+
+function updateElevationHover() {
+  const profile = ui.elevationProfile;
+  const canvas = document.getElementById("elevation-profile-canvas");
+  const point = ui.elevationPointer;
+  if (!profile?.devices?.length || !canvas || !point || !ui.map) return;
+  const layout = elevationChartLayout(canvas.clientWidth, canvas.clientHeight, profile);
+  const distance = ((point.x - layout.pad.left) / layout.plotWidth) * layout.maxDistance;
+  const clamped = Math.min(layout.maxDistance, Math.max(0, distance));
+  let best = null;
+  let bestScore = Infinity;
+  const several = profile.devices.length > 1;
+  profile.devices.forEach((device, index) => {
+    const sample = nearestElevationSample(device.samples, clamped);
+    if (!sample) return;
+    const dx = layout.x(Number(sample.d) || 0) - point.x;
+    const elevation = Number(sample.ele);
+    const dy = several && Number.isFinite(elevation) ? layout.y(elevation) - point.y : 0;
+    const score = dx * dx + dy * dy;
+    if (score < bestScore) {
+      bestScore = score;
+      best = { device, sample, color: elevationSeriesColor(device.device_id, index) };
+    }
+  });
+  if (!best) return;
+  ui.elevationHover = best;
+  const readout = document.getElementById("elevation-profile-readout");
+  if (readout) {
+    const parts = [];
+    if (several) parts.push(best.device.device_name || best.device.device_id || "");
+    parts.push(formatRouteDistance(Number(best.sample.d) || 0));
+    parts.push(formatElevationMeters(Number(best.sample.ele)));
+    readout.textContent = parts.filter(Boolean).join(" · ");
+    readout.hidden = false;
+    const placeRight = point.x > canvas.clientWidth * 0.62;
+    readout.style.left = placeRight ? "auto" : `${Math.max(8, point.x + 12)}px`;
+    readout.style.right = placeRight ? `${Math.max(8, canvas.clientWidth - point.x + 12)}px` : "auto";
+  }
+  const lat = Number(best.sample.lat);
+  const lon = Number(best.sample.lon);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    const latlng = L.latLng(lat, lon);
+    const stroke = getMapCssVar("--elevation-marker-stroke", getMapCssVar("--color-surface-elevated"));
+    if (!ui.elevationMarker) {
+      ui.elevationMarker = L.circleMarker(latlng, {
+        radius: 7,
+        weight: 3,
+        color: stroke,
+        fillColor: best.color,
+        fillOpacity: 1,
+        opacity: 1,
+        interactive: false,
+      }).addTo(ui.map);
+    } else {
+      ui.elevationMarker.setLatLng(latlng);
+      ui.elevationMarker.setStyle({ fillColor: best.color, color: stroke });
+      if (!ui.map.hasLayer(ui.elevationMarker)) ui.elevationMarker.addTo(ui.map);
+    }
+    ui.elevationMarker.bringToFront();
+  }
+  drawElevationCanvas();
+}
+
+function scheduleElevationPointer(event) {
+  const canvas = document.getElementById("elevation-profile-canvas");
+  if (!canvas || !ui.elevationProfile) return;
+  const rect = canvas.getBoundingClientRect();
+  ui.elevationPointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  if (ui.elevationHoverFrame) return;
+  ui.elevationHoverFrame = requestAnimationFrame(() => {
+    ui.elevationHoverFrame = 0;
+    updateElevationHover();
+  });
+}
+
+function initElevationProfile() {
+  const panel = elevationPanel();
+  const canvas = document.getElementById("elevation-profile-canvas");
+  if (!panel || !canvas || panel.dataset.bound === "true") return;
+  panel.dataset.bound = "true";
+  panel.setAttribute("aria-label", t("map.elevation.aria"));
+  canvas.addEventListener("pointerdown", (event) => {
+    ui.elevationPointerDown = true;
+    if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+    scheduleElevationPointer(event);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse" && !ui.elevationPointerDown) return;
+    scheduleElevationPointer(event);
+  });
+  const endPointer = () => {
+    ui.elevationPointerDown = false;
+    clearElevationHover();
+    drawElevationCanvas();
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  canvas.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "mouse" && !ui.elevationPointerDown) endPointer();
+  });
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => drawElevationCanvas());
+    observer.observe(panel);
+  }
+}
+
 function buildMapPage() {
   const page = document.getElementById("page-map");
   page.classList.add("active");
-  page.innerHTML = `<div class="map-layout"><div class="map-drawer-backdrop" aria-hidden="true"></div><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
+  page.innerHTML = `<div class="map-layout"><div class="map-drawer-backdrop" aria-hidden="true"></div><div class="card ui-panel map-filters-panel"><div id="map-filters" class="ui-form-grid"></div></div><div class="map-wrap ui-map-wrap"><div id="map"></div><div id="elevation-profile" class="elevation-profile" hidden><canvas id="elevation-profile-canvas" class="elevation-profile-canvas"></canvas><div id="elevation-profile-readout" class="elevation-profile-readout" hidden></div><div id="elevation-profile-status" class="elevation-profile-status" hidden></div></div><div class="map-overlay ui-overlay-panel" id="map-overlay"></div></div></div>`;
 
   ui.mapLayoutEl = page.querySelector(".map-layout");
   ui.mapDrawerBackdropEl = page.querySelector(".map-drawer-backdrop");
@@ -1805,6 +2237,7 @@ function buildMapPage() {
   }).setView([51.2, 10.4], 6);
   initMapFitControl();
   initMapRouteStatsControl();
+  initElevationProfile();
   ui.map.on("click", () => closePinnedRouteTooltip());
   document.addEventListener("click", (event) => {
     const target = event.target;
@@ -1890,6 +2323,7 @@ async function refreshMapData(opts = {}) {
   if (opts.background && ui.mapRangeLoadActive) return;
   const load = beginMapLoad();
   if (ui.mapRange === MAP_RANGE_CURRENT) {
+    hideElevationProfile();
     ui.mapRangeLoadActive = false;
     clearMapRouteLoading();
     if (opts.reloadBtn) {
@@ -1935,6 +2369,7 @@ async function refreshMapData(opts = {}) {
       clearMapOverlays();
       setMapRouteStats({ count: 0, distanceMeters: 0 });
     }
+    hideElevationProfile();
     setFieldState(fromField, "error", error);
     setFieldState(toField, "error", error);
     return;
@@ -1949,6 +2384,7 @@ async function refreshMapData(opts = {}) {
     clearMapRouteLoading();
     clearMapOverlays();
     setMapRouteStats({ count: 0, distanceMeters: 0 });
+    hideElevationProfile();
     if (load.isCurrent() && opts.reloadBtn) setButtonLoading(opts.reloadBtn, false);
     return;
   }
@@ -1956,6 +2392,11 @@ async function refreshMapData(opts = {}) {
   if (from) query.set("from", from);
   if (to) query.set("to", to);
   deviceIds.forEach((id) => query.append("device_id", id));
+  showElevationLoading();
+  const profilePromise = loadRouteProfile(query, load.signal).then(
+    (data) => ({ ok: true, data }),
+    (err) => ({ ok: false, err }),
+  );
   ui.mapRangeLoadActive = true;
   const session = createRouteDrawSession({ preserveView: !!opts.preserveView });
   let mapReset = false;
@@ -1973,7 +2414,7 @@ async function refreshMapData(opts = {}) {
   let hasMore = false;
   const publishProgress = (done) => {
     if (!load.isCurrent()) return;
-    setMapRouteStats({ count: session.count, distanceMeters: session.distanceMeters });
+    setMapRouteStats({ count: session.count, distanceMeters: ui.mapRouteStatsDistanceMeters });
     const elapsed = performance.now() - startedAt;
     const longEnough = elapsed >= 200 || hasMore || (Number(total) > ROUTE_RENDER_CHUNK);
     if (!revealed && (done || !longEnough)) return;
@@ -2018,6 +2459,22 @@ async function refreshMapData(opts = {}) {
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
     publishProgress(true);
+    const profileResult = await profilePromise;
+    if (!load.isCurrent()) return;
+    if (!profileResult.ok) {
+      if (!isAbortError(profileResult.err)) {
+        pushToast(ui.toastArea, profileResult.err?.message || t("map.elevation.failed"), "error");
+      }
+      showElevationStatus("map.elevation.failed");
+      setMapRouteStats({ count: session.count, distanceMeters: 0 });
+    } else {
+      const distance = Number(profileResult.data?.distance_m);
+      setMapRouteStats({
+        count: session.count,
+        distanceMeters: Number.isFinite(distance) && distance > 0 ? distance : 0,
+      });
+      renderElevationProfile(profileResult.data);
+    }
     if (revealed && total != null && processed >= total) {
       await yieldToMain();
       await yieldToMain();
@@ -2025,6 +2482,7 @@ async function refreshMapData(opts = {}) {
   } catch (err) {
     if (!load.isCurrent() || isAbortError(err)) return;
     clearMapOverlays();
+    hideElevationProfile();
     setMapRouteStats({ count: 0, distanceMeters: 0 });
     pushToast(ui.toastArea, err.message, "error");
   } finally {
@@ -2063,7 +2521,6 @@ function createRouteDrawSession({ preserveView = false } = {}) {
   const devices = new Map();
   const seen = new Set();
   let count = 0;
-  let distanceMeters = 0;
   let userMovedMap = false;
   let listenerAttached = false;
   let fittedInitial = false;
@@ -2086,39 +2543,40 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     let device = devices.get(deviceId);
     if (device) return device;
     const stroke = resolvePaletteColor(getDeviceColorIndex(deviceId));
-    const line = L.polyline([], {
+    const lineOptions = {
       color: stroke,
-      weight: getMapCssNumber("--map-route-line-width", 3),
-      opacity: getMapCssNumber("--map-route-line-opacity", 0.9),
+      weight: getMapCssNumber("--map-route-line-width", 4),
+      opacity: getMapCssNumber("--map-route-line-opacity", 0.95),
+      lineCap: "round",
+      lineJoin: "round",
+      smoothFactor: 0,
+      interactive: false,
+    };
+    const line = L.polyline([], lineOptions).addTo(ui.map);
+    const hit = L.polyline([], {
+      weight: 16,
+      opacity: 0,
+      lineCap: "round",
+      lineJoin: "round",
+      smoothFactor: 0,
     }).addTo(ui.map);
-    ui.routeLines.push(line);
+    hit.on("click", (event) => {
+      openNearestRouteTooltip(event.latlng);
+      if (event?.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
+    });
+    ui.routeLines.push(line, hit);
     device = {
       stroke,
       line,
+      hit,
       segments: [[]],
       lastPoint: null,
-      lastMarker: null,
-      prevLat: 0,
-      prevLng: 0,
-      hasPrev: false,
     };
     devices.set(deviceId, device);
     return device;
   }
 
-  function routePointStyle() {
-    return {
-      radius: getMapCssNumber("--map-route-point-radius", 3),
-      fillColor: getMapCssVar("--map-route-point-fill"),
-      color: getMapCssVar("--map-route-point-stroke"),
-      weight: getMapCssNumber("--map-route-point-stroke-width", 1),
-      fillOpacity: getMapCssNumber("--map-route-point-fill-opacity", 1),
-      opacity: getMapCssNumber("--map-route-point-stroke-opacity", 1),
-      className: "map-route-point",
-    };
-  }
-
-  function acceptPoint(point, style) {
+  function acceptPoint(point) {
     if (!point?.device_id || !state.visibleDeviceIds.has(point.device_id)) return false;
     const key = buildPositionDedupKey(point);
     if (seen.has(key)) return false;
@@ -2128,26 +2586,11 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     const lng = Number(point.longitude);
     const segment = device.segments[device.segments.length - 1];
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      if (device.hasPrev) distanceMeters += haversineDistanceMeters(device.prevLat, device.prevLng, lat, lng);
-      device.prevLat = lat;
-      device.prevLng = lng;
-      device.hasPrev = true;
       segment.push(L.latLng(lat, lng));
-    } else {
-      device.hasPrev = false;
-      if (segment.length) device.segments.push([]);
-      device.lastPoint = point;
-      count += 1;
-      return device;
+      ui.routeClickPoints.push(point);
+    } else if (segment.length) {
+      device.segments.push([]);
     }
-    const marker = L.circleMarker([lat, lng], style).addTo(ui.map);
-    marker.bindTooltip(buildPositionTooltipHtml(point), {
-      sticky: true,
-      className: "map-point-tooltip",
-    });
-    bindRoutePointInteractions(marker);
-    ui.routePointMarkers.push(marker);
-    device.lastMarker = marker;
     device.lastPoint = point;
     count += 1;
     return device;
@@ -2162,11 +2605,10 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     if (!points.length) return;
     const bounds = L.latLngBounds(points);
     if (!bounds.isValid()) return;
-    ui.map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18, animate: false });
+    ui.map.fitBounds(bounds, { ...mapBoundsFitOptions(), maxZoom: 18, animate: false });
   }
 
   async function append(positions, { isCurrent, onChunk, beforePoints } = {}) {
-    const style = routePointStyle();
     const list = Array.isArray(positions) ? positions : [];
     if (!list.length) return !isCurrent || isCurrent();
     ensureDragListener();
@@ -2178,14 +2620,16 @@ function createRouteDrawSession({ preserveView = false } = {}) {
       let accepted = 0;
       const end = Math.min(list.length, index + ROUTE_RENDER_CHUNK);
       for (let i = index; i < end; i += 1) {
-        const device = acceptPoint(list[i], style);
+        const device = acceptPoint(list[i]);
         if (!device) continue;
         dirty.add(device);
         accepted += 1;
       }
       dirty.forEach((device) => {
         const segments = device.segments.filter((segment) => segment.length);
-        device.line.setLatLngs(segments.length === 1 ? segments[0] : segments);
+        const latlngs = segments.length === 1 ? segments[0] : segments;
+        device.line.setLatLngs(latlngs);
+        device.hit.setLatLngs(latlngs);
       });
       if (!fittedInitial && count > 0) {
         fittedInitial = true;
@@ -2207,12 +2651,6 @@ function createRouteDrawSession({ preserveView = false } = {}) {
       const latestLng = Number(latest.longitude);
       if (!Number.isFinite(latestLat) || !Number.isFinite(latestLng)) return;
       if (customPast || !isCurrentPoint(deviceId, latest.timestamp)) return;
-      if (device.lastMarker) {
-        ui.map.removeLayer(device.lastMarker);
-        const markerIndex = ui.routePointMarkers.indexOf(device.lastMarker);
-        if (markerIndex >= 0) ui.routePointMarkers.splice(markerIndex, 1);
-        device.lastMarker = null;
-      }
       const marker = L.circleMarker([latestLat, latestLng], {
         radius: getMapCssNumber("--map-live-point-radius", 7),
         fillColor: device.stroke,
@@ -2245,9 +2683,6 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     dispose,
     get count() {
       return count;
-    },
-    get distanceMeters() {
-      return distanceMeters;
     },
   };
 }
@@ -4038,6 +4473,7 @@ function applyTheme(name) {
   }
   link.onload = () => {
     syncMetaThemeColor();
+    drawElevationCanvas();
   };
   link.href = `/themes/${name}/theme.css`;
 }

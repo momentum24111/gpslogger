@@ -77,6 +77,13 @@
         "failed": "Der GPX-Export ist fehlgeschlagen.",
         "noDevices": "Keine Geräte ausgewählt."
       }
+    },
+    "elevation": {
+      "loading": "Höhenprofil wird geladen …",
+      "empty": "Keine Höhenangaben für die ausgewählte Route.",
+      "failed": "Das Höhenprofil konnte nicht geladen werden.",
+      "meters": "{elevation} m",
+      "aria": "Höhenprofil der ausgewählten Route"
     }
   },
   "time": {

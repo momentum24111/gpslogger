@@ -77,6 +77,13 @@
         "failed": "GPX export failed.",
         "noDevices": "No devices selected."
       }
+    },
+    "elevation": {
+      "loading": "Loading elevation profile …",
+      "empty": "No elevation data for the selected route.",
+      "failed": "The elevation profile could not be loaded.",
+      "meters": "{elevation} m",
+      "aria": "Elevation profile of the selected route"
     }
   },
   "time": {

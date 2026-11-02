@@ -170,8 +170,16 @@
   --device-map-palette-5: #4361ee;
   --device-map-palette-5-soft: color-mix(in srgb, var(--device-map-palette-5) 38%, transparent);
 
-  --map-route-line-width: 3;
-  --map-route-line-opacity: 0.9;
+  --map-route-line-width: 4;
+  --map-route-line-opacity: 0.95;
+  --elevation-panel-bg: color-mix(in srgb, var(--color-surface-elevated) 94%, transparent);
+  --elevation-panel-fg: var(--color-text);
+  --elevation-panel-muted: var(--color-text-muted);
+  --elevation-panel-grid: var(--color-border);
+  --elevation-panel-border: var(--color-border);
+  --elevation-panel-shadow: 0 10px 28px var(--color-shadow);
+  --elevation-marker-stroke: var(--color-surface-elevated);
+  --elevation-cursor: var(--color-text);
   --map-route-point-radius: 3;
   --map-route-point-hover-radius: 7;
   --map-route-point-fill: #ffffff;
