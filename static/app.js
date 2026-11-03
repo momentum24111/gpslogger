@@ -15,6 +15,7 @@ import {
   readModalAnimationDurationMs,
 } from "/static/ui-components.js";
 import { initInkRipple } from "/static/ripple.js";
+import { isClosedHistoricalRange, keepPreviousRouteEndpoint, livePositionRouteAction } from "/static/route-live-rules.js";
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -308,6 +309,9 @@ const ui = {
   mapRouteStatsDistanceMeters: 0,
   gpxExporting: false,
   routeClickPoints: [],
+  routePointKeys: new Set(),
+  routeDevices: null,
+  routeFullByDevice: new Map(),
   elevationProfile: null,
   elevationMarker: null,
   elevationHover: null,
@@ -513,7 +517,12 @@ async function bootstrap() {
 
 async function runAutoRefreshCycle() {
   try {
-    await refreshMapData({ preserveView: true, background: true });
+    if (ui.mapRange === MAP_RANGE_CURRENT) {
+      await loadDeviceStatuses();
+      syncCurrentPositionMarkers({ preserveView: true });
+    } else {
+      refreshLiveMarkerLabels();
+    }
     if (ui.settingsModalOpen) {
       await loadSettings();
       await loadDevices();
@@ -674,6 +683,7 @@ function addLivePointInitialMarker(latLng, deviceName) {
     }),
   }).addTo(ui.map);
   ui.liveLabelMarkers.push(marker);
+  return marker;
 }
 
 function closePinnedRouteTooltip() {
@@ -731,6 +741,9 @@ function clearMapOverlays() {
   ui.routePointMarkers.forEach((marker) => ui.map.removeLayer(marker));
   ui.routePointMarkers = [];
   ui.routeClickPoints = [];
+  ui.routePointKeys.clear();
+  ui.routeDevices = new Map();
+  ui.routeFullByDevice = new Map();
   closePinnedRouteTooltip();
   clearElevationHover();
 }
@@ -859,7 +872,7 @@ function connectPositionStream() {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.type === "position") {
-        refreshMapData({ preserveView: true, background: true });
+        applyLivePosition(msg.position);
         scheduleStorageOverviewRefresh();
       }
     } catch (_e) {
@@ -1788,6 +1801,7 @@ async function loadRouteProfile(baseQuery, signal) {
 }
 
 function renderElevationProfile(profile) {
+  rememberRouteFull(profile);
   const devices = Array.isArray(profile?.devices)
     ? profile.devices.filter((device) => Array.isArray(device.samples) && device.samples.length)
     : [];
@@ -2456,6 +2470,7 @@ async function refreshMapData(opts = {}) {
     if (!load.isCurrent()) return;
     if (session.count === 0) resetMapForLoad();
     session.finish();
+    ui.routeDevices = session.devices;
     setFieldState(fromField, "success", "");
     setFieldState(toField, "success", "");
     publishProgress(true);
@@ -2566,6 +2581,7 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     });
     ui.routeLines.push(line, hit);
     device = {
+      id: deviceId,
       stroke,
       line,
       hit,
@@ -2581,6 +2597,7 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     const key = buildPositionDedupKey(point);
     if (seen.has(key)) return false;
     seen.add(key);
+    ui.routePointKeys.add(key);
     const device = ensureDevice(point.device_id);
     const lat = Number(point.latitude);
     const lng = Number(point.longitude);
@@ -2670,7 +2687,10 @@ function createRouteDrawSession({ preserveView = false } = {}) {
         className: "map-point-tooltip map-point-tooltip--live",
       });
       marker.addTo(ui.map);
-      addLivePointInitialMarker([latestLat, latestLng], getDeviceDisplayName(latest.device_id, latest.device_name));
+      marker.__liveLabel = addLivePointInitialMarker(
+        [latestLat, latestLng],
+        getDeviceDisplayName(latest.device_id, latest.device_name),
+      );
       ui.markers.set(deviceId, marker);
     });
     fitIfNeeded();
@@ -2683,6 +2703,9 @@ function createRouteDrawSession({ preserveView = false } = {}) {
     dispose,
     get count() {
       return count;
+    },
+    get devices() {
+      return devices;
     },
   };
 }
@@ -2774,13 +2797,276 @@ function resolveRangeQuery(range, customFrom, customTo) {
 }
 
 function isCustomRangeInPast() {
-  if (ui.mapRange !== "custom") return false;
   const toInput = document.getElementById("map-to");
-  const toValue = toInput?.value || "";
-  if (!toValue) return false;
-  const toDateEnd = new Date(`${toValue}T23:59:59.999`);
-  if (Number.isNaN(toDateEnd.getTime())) return false;
-  return toDateEnd.getTime() < Date.now();
+  return isClosedHistoricalRange(ui.mapRange, toInput?.value || "");
+}
+
+function rememberRouteFull(profile) {
+  const next = new Map();
+  (profile?.devices || []).forEach((device) => {
+    if (!device?.device_id) return;
+    next.set(device.device_id, {
+      count: Number(device.point_count) || 0,
+      distance: Number(device.distance_m) || 0,
+    });
+  });
+  ui.routeFullByDevice = next;
+}
+
+function rememberDeviceStatus(position) {
+  const deviceId = String(position?.device_id || "");
+  if (!deviceId) return;
+  const previous = state.deviceStatuses[deviceId] || {};
+  state.deviceStatuses[deviceId] = {
+    ...previous,
+    latitude: position.latitude,
+    longitude: position.longitude,
+    altitude: position.altitude ?? previous.altitude,
+    accuracy: position.accuracy ?? previous.accuracy,
+    battery: position.battery ?? previous.battery,
+    speed: position.speed ?? previous.speed,
+    direction: position.direction ?? previous.direction,
+    last_seen: position.timestamp || previous.last_seen,
+  };
+}
+
+function refreshLiveMarkerLabels() {
+  ui.markers.forEach((marker, deviceId) => {
+    const seenAt = state.deviceStatuses[deviceId]?.last_seen;
+    if (!seenAt) return;
+    marker.getTooltip()?.setContent(escapeHtml(formatRelativeTime(seenAt)));
+  });
+}
+
+function removeLiveMarker(deviceId) {
+  const marker = ui.markers.get(deviceId);
+  if (!marker) return;
+  ui.map?.removeLayer(marker);
+  if (marker.__liveLabel) {
+    ui.map?.removeLayer(marker.__liveLabel);
+    ui.liveLabelMarkers = ui.liveLabelMarkers.filter((item) => item !== marker.__liveLabel);
+  }
+  ui.markers.delete(deviceId);
+}
+
+function placeLiveMarker(deviceId, point, color) {
+  if (!ui.map) return;
+  const lat = Number(point.latitude);
+  const lng = Number(point.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const latlng = L.latLng(lat, lng);
+  const name = getDeviceDisplayName(deviceId, point.device_name);
+  let marker = ui.markers.get(deviceId);
+  if (!marker) {
+    marker = L.circleMarker(latlng, {
+      radius: getMapCssNumber("--map-live-point-radius", 7),
+      fillColor: color,
+      color: getMapCssVar("--map-live-point-border"),
+      weight: getMapCssNumber("--map-live-point-border-width", 2),
+      fillOpacity: getMapCssNumber("--map-live-point-fill-opacity", 1),
+      opacity: getMapCssNumber("--map-live-point-stroke-opacity", 1),
+      className: "map-live-point map-live-point--pulse",
+    }).addTo(ui.map);
+    marker.bindTooltip(escapeHtml(formatRelativeTime(point.timestamp)), {
+      permanent: true,
+      direction: "top",
+      offset: [0, -24],
+      className: "map-live-age-tooltip",
+    });
+    marker.bindPopup(buildPositionTooltipHtml(point, name), {
+      className: "map-point-tooltip map-point-tooltip--live",
+    });
+    marker.__liveLabel = addLivePointInitialMarker(latlng, name);
+    ui.markers.set(deviceId, marker);
+    return;
+  }
+  marker.setLatLng(latlng);
+  marker.setStyle({ fillColor: color });
+  if (marker.setPopupContent) marker.setPopupContent(buildPositionTooltipHtml(point, name));
+  marker.getTooltip()?.setContent(escapeHtml(formatRelativeTime(point.timestamp)));
+  marker.__liveLabel?.setLatLng(latlng);
+}
+
+function syncCurrentPositionMarkers({ preserveView = true } = {}) {
+  if (!ui.map || ui.mapRange !== MAP_RANGE_CURRENT) return;
+  const visible = new Set();
+  state.devices.forEach((device) => {
+    if (!state.visibleDeviceIds.has(device.id)) return;
+    const status = state.deviceStatuses[device.id];
+    if (status?.latitude == null || status?.longitude == null) return;
+    visible.add(device.id);
+    placeLiveMarker(device.id, {
+      ...status,
+      device_id: device.id,
+      device_name: device.name,
+      latitude: Number(status.latitude),
+      longitude: Number(status.longitude),
+      timestamp: status.last_seen || "",
+    }, resolvePaletteColor(getDeviceColorIndex(device.id)));
+  });
+  [...ui.markers.keys()].forEach((deviceId) => {
+    if (!visible.has(deviceId)) removeLiveMarker(deviceId);
+  });
+  if (!preserveView && visible.size) {
+    const points = [...ui.markers.values()].map((marker) => marker.getLatLng());
+    const bounds = L.latLngBounds(points);
+    if (bounds.isValid()) ui.map.fitBounds(bounds, { ...mapBoundsFitOptions(), maxZoom: 18 });
+  }
+  setMapRouteStats({ count: visible.size, distanceMeters: 0 });
+}
+
+function ensureLiveRouteDevice(deviceId) {
+  if (!ui.routeDevices) ui.routeDevices = new Map();
+  const existing = ui.routeDevices.get(deviceId);
+  if (existing) return existing;
+  const stroke = resolvePaletteColor(getDeviceColorIndex(deviceId));
+  const line = L.polyline([], {
+    color: stroke,
+    weight: getMapCssNumber("--map-route-line-width", 4),
+    opacity: getMapCssNumber("--map-route-line-opacity", 0.95),
+    lineCap: "round",
+    lineJoin: "round",
+    smoothFactor: 0,
+    interactive: false,
+  }).addTo(ui.map);
+  const hit = L.polyline([], {
+    weight: 16,
+    opacity: 0,
+    lineCap: "round",
+    lineJoin: "round",
+    smoothFactor: 0,
+  }).addTo(ui.map);
+  hit.on("click", (event) => {
+    openNearestRouteTooltip(event.latlng);
+    if (event?.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
+  });
+  ui.routeLines.push(line, hit);
+  const device = { id: deviceId, stroke, line, hit, segments: [[]], lastPoint: null };
+  ui.routeDevices.set(deviceId, device);
+  return device;
+}
+
+function syncRouteDeviceGeometry(device) {
+  const segments = device.segments.filter((segment) => segment.length);
+  const latlngs = segments.length === 1 ? segments[0] : segments;
+  device.line.setLatLngs(latlngs);
+  device.hit.setLatLngs(latlngs);
+}
+
+function popRouteVertex(device) {
+  for (let index = device.segments.length - 1; index >= 0; index -= 1) {
+    const segment = device.segments[index];
+    if (!segment.length) continue;
+    segment.pop();
+    if (!segment.length && device.segments.length > 1) device.segments.splice(index, 1);
+    break;
+  }
+  for (let index = ui.routeClickPoints.length - 1; index >= 0; index -= 1) {
+    if (ui.routeClickPoints[index].device_id === device.id) {
+      ui.routeClickPoints.splice(index, 1);
+      break;
+    }
+  }
+}
+
+function appendElevationSample(deviceId, deviceName, sample, addedDistance) {
+  const profile = ui.elevationProfile;
+  if (!profile) return;
+  let device = profile.devices.find((entry) => entry.device_id === deviceId);
+  if (!device) {
+    device = {
+      device_id: deviceId,
+      device_name: deviceName,
+      distance_m: 0,
+      point_count: 0,
+      samples: [],
+    };
+    profile.devices.push(device);
+  }
+  device.samples.push(sample);
+  device.distance_m = (Number(device.distance_m) || 0) + addedDistance;
+  device.point_count = (Number(device.point_count) || 0) + 1;
+  profile.distance_m = (Number(profile.distance_m) || 0) + addedDistance;
+  profile.point_count = (Number(profile.point_count) || 0) + 1;
+  if (Number.isFinite(Number(sample.ele))) {
+    ui.elevationStatusKey = "";
+    const status = document.getElementById("elevation-profile-status");
+    if (status) status.hidden = true;
+  }
+  drawElevationCanvas();
+}
+
+function appendLiveRoutePoint(point) {
+  const lat = Number(point.latitude);
+  const lng = Number(point.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !ui.map) return;
+  const key = buildPositionDedupKey(point);
+  if (ui.routePointKeys.has(key)) return;
+  const device = ensureLiveRouteDevice(point.device_id);
+  const previousLat = Number(device.lastPoint?.latitude);
+  const previousLng = Number(device.lastPoint?.longitude);
+  const addedDistance = Number.isFinite(previousLat) && Number.isFinite(previousLng)
+    ? haversineDistanceMeters(previousLat, previousLng, lat, lng)
+    : 0;
+  const known = ui.routeFullByDevice.get(point.device_id);
+  const keepPrevious = known ? keepPreviousRouteEndpoint(known.count, getActiveMapPointStride()) : true;
+  if (!keepPrevious && device.segments.some((segment) => segment.length)) {
+    popRouteVertex(device);
+    ui.mapRouteStatsCount = Math.max(0, ui.mapRouteStatsCount - 1);
+  }
+  const segment = device.segments[device.segments.length - 1] || device.segments[0];
+  segment.push(L.latLng(lat, lng));
+  ui.routeClickPoints.push(point);
+  ui.routePointKeys.add(key);
+  device.lastPoint = point;
+  syncRouteDeviceGeometry(device);
+  if (known) {
+    known.count = (Number(known.count) || 0) + 1;
+    known.distance = (Number(known.distance) || 0) + addedDistance;
+  }
+  const nextDistance = (Number(ui.mapRouteStatsDistanceMeters) || 0) + addedDistance;
+  setMapRouteStats({ count: ui.mapRouteStatsCount + 1, distanceMeters: nextDistance });
+  appendElevationSample(
+    point.device_id,
+    point.device_name || getDeviceDisplayName(point.device_id),
+    {
+      d: known ? known.distance : nextDistance,
+      lat,
+      lon: lng,
+      ele: Number.isFinite(Number(point.altitude)) ? Number(point.altitude) : null,
+    },
+    addedDistance,
+  );
+  placeLiveMarker(point.device_id, point, device.stroke);
+}
+
+function applyLivePosition(position) {
+  if (!position?.device_id || !ui.map) return;
+  rememberDeviceStatus(position);
+  const fromInput = document.getElementById("map-from");
+  const toInput = document.getElementById("map-to");
+  const resolved = ui.mapRange === MAP_RANGE_CURRENT
+    ? { from: "", to: "" }
+    : resolveRangeQuery(ui.mapRange, fromInput?.value || "", toInput?.value || "");
+  const action = livePositionRouteAction({
+    range: ui.mapRange,
+    customTo: toInput?.value || "",
+    deviceVisible: state.visibleDeviceIds.has(position.device_id),
+    duplicate: ui.routePointKeys.has(buildPositionDedupKey(position)),
+    timestamp: position.timestamp,
+    rangeFrom: resolved.from,
+    rangeTo: resolved.to,
+    loading: ui.mapRangeLoadActive,
+  });
+  if (action === "marker") {
+    if (!state.visibleDeviceIds.has(position.device_id)) {
+      removeLiveMarker(position.device_id);
+      return;
+    }
+    placeLiveMarker(position.device_id, position, resolvePaletteColor(getDeviceColorIndex(position.device_id)));
+    return;
+  }
+  if (action === "append") appendLiveRoutePoint(position);
 }
 
 function isCurrentPoint(deviceId, latestTs) {
